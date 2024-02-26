@@ -4,6 +4,7 @@
 
 # Palette
 
+## Requirements and Installation
 
 
 ## Tutorial
