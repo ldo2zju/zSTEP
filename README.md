@@ -4,3 +4,15 @@
 
 # Palette
 
+
+
+## Tutorial
+Here we provide a step-by-step tutorial
+
+
+
+## About
+If you have any questions, please feel free to contact the following authors responsible for the Palette design, Dr. Yang Dong (yang.dongau@gmail.com), Dr. Tao Cheng (chengtao2ldo@zju.edu.cn) or Dr. Jie Liao (liaojie@zju.edu.cn).
+
+## Reference
+
