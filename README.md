@@ -4,7 +4,9 @@
 
 # Palette
 
-![Image text](images/Palette pipeline.jpeg)
+<p align="center">
+  <img width="1200"  src="https://github.com/ldo2zju/DreAM/blob/main/images/Palette%20pipeline.png">
+</p>
 
 ## Requirements and Installation
 
