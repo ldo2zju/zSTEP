@@ -4,7 +4,7 @@
 
 # Palette
 
-![Image text](images/Palette pipeline.png)
+![Image text](images/Palette pipeline.jpeg)
 
 ## Requirements and Installation
 
