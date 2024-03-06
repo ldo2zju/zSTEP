@@ -1,0 +1,308 @@
+---
+title: "7. Cell proportion and spatial cellchat analysis"
+author: "Yang"
+date: "2023-10-23"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+### Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+### Load package
+```{r}
+library(Seurat)
+library(CellChat)
+library(areaplot)
+library(tibble)
+```
+### Load data
+```{r}
+seurat_zf10 <- readRDS(here::here("output","zf10_final_version.rds"))
+```
+
+### Plot gene expression patterns
+```{r}
+SpatialFeaturePlot(seurat_zf10, feature = c("hoxd12a"), alpha =  c(0.1, 1),pt.size.factor = 4,image.alpha = 0,stroke = 0.01) + ggplot2::theme_classic() +
+    scale_fill_gradientn(colors=alpha(c("lightgrey","darkblue"), 1)) 
+
+ggsave("tbx6.tiff",path = here::here("analysis","zf10_images"), width = 3, height = 3, device='tiff', dpi=700)
+```
+
+### Plot cell proportions
+```{r}
+seurat_zf10 <- subset(seurat_zf10, subset = bin_annotation == "blank", invert = TRUE)
+seurat_zf12 <- subset(seurat_zf12, subset = bin_annotation == "blank", invert = TRUE)
+seurat_zf16 <- subset(seurat_zf16, subset = bin_annotation == "blank", invert = TRUE)
+
+cell_types <- seurat_zf10$bin_annotation %>% as.data.frame() %>% 
+  rbind(seurat_zf12$bin_annotation %>% as.data.frame()) %>%
+  rbind(seurat_zf16$bin_annotation %>% as.data.frame())
+df_all <- data_frame(Var1 = unique(cell_types$.))
+df1 <- prop.table(table(seurat_zf10$bin_annotation)) %>% as.data.frame()
+colnames(df1) <- c("Var1","10 hpf")
+df2 <- prop.table(table(seurat_zf12$bin_annotation)) %>% as.data.frame()
+colnames(df2) <- c("Var1","12 hpf")
+df3 <- prop.table(table(seurat_zf16$bin_annotation)) %>% as.data.frame()
+colnames(df3) <- c("Var1","16 hpf")
+df_all <- df_all %>% left_join(df1) %>% left_join(df2) %>% left_join(df3)
+df_all[is.na(df_all)] <- 0
+df_all <- df_all %>% column_to_rownames("Var1") %>% t() %>% as.data.frame()
+
+df_all <- df_all[,c("Yolk Syncytial Layer",
+                    "Periderm",
+          "Yolk Syncytial Layer, Periderm",
+          "Polster",
+          "Hatching Gland",
+          "Anterior Neural Keel",
+          "Posterior Neural Keel",
+          "Neural Rod",
+          "Forebrain",
+          "Immature Eye, Midbrain",
+          "Optic Vesicle",
+          "Neural Crest, Otic Vesicle",
+          "Nervous System",
+          "Neural Crest",
+          "Angioblastic Mesenchymal Cell",
+          "Notochord",
+          "Paraxial Mesoderm, Neural Keel",
+          "Adaxial Cell",
+          "Somite",
+          "Lateral Plate Mesoderm",
+          "Pronephros",
+          "Erythroid Lineage Cell",
+          "Segmental Plate, Tail Bud")]
+
+df_combined_color <- c("#2ED9FF","#FFF799","#f1b6da","#7f3b08","#938F4C","#009200","#F091A0","#bd0026","#F8A19F","#8B7042","#91EA54","#422517","#3283FE","#F6222E","#FBE426","#FEAF16","#683B79","#BBA1CB","#5A5156","#00AD87FF","#A67EB7","#1a8a56","#6E9BC5")
+
+
+
+rownames(df_all) <- c(1,2,3)
+x <- c(1,2,3)
+
+areaplot(x, df_all, prop = TRUE, col = df_combined_color,
+         border = "white",
+         lwd = 1,
+         lty = 1)
+```
+
+### Select planes for spatial cell-cell communication
+### Select midline slice
+```{r}
+subset <- subset(seurat_zf10, subset = z_3 > -10)
+subset <- subset(subset, subset = z_3 <  10)
+
+SpatialFeaturePlot(subset, feature = c("tbxta"), alpha =  c(0.1, 1),pt.size.factor = 4,image.alpha = 0,stroke = 0.01) + ggplot2::theme_classic() +
+   theme(legend.position= "none",
+         axis.title.x=element_blank(),
+         axis.line.x = element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.line.y = element_blank())
+
+ggplot(subset@meta.data %>% as.data.frame(),aes(x=x_3, y=y_3, color=bin_annotation)) +
+  geom_point(size=0.5) 
+
+```
+
+#### Prepare input data for CelChat analysis
+```{r}
+
+data.input = GetAssayData(subset, slot = "data", assay = "RNA") 
+Idents(subset) <- subset$bin_annotation
+
+meta = data.frame(labels = Idents(subset), row.names = names(Idents(subset)))
+
+unique(meta$labels)
+
+spatial.locs = GetTissueCoordinates(subset, scale = NULL, cols = c("x_3", "y_3")) 
+spatial.locs <- spatial.locs[,1:2]
+
+spatial.locs$x <-  as.integer(spatial.locs$x)
+spatial.locs$y <-  as.integer(spatial.locs$y)
+
+scale.factors = list(spot.diameter = 15, spot = 225)
+```
+
+#### Create CellChat object
+```{r}
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels",
+                           datatype = "spatial", coordinates = spatial.locs,scale.factors = scale.factors)
+
+CellChatDB <- CellChatDB.zebrafish
+CellChatDB.use <- CellChatDB
+cellchat@DB <- CellChatDB.use
+```
+
+```{r}
+cellchat <- subsetData(cellchat)
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.1, 
+                               distance.use = TRUE, interaction.length = 200, scale.distance = 1)
+
+cell.levels <- c("blank","Segmental Plate, Tail Bud","Anterior Neural Keel","Paraxial Mesoderm, Neural Keel","Notochord","Posterior Neural Keel","Periderm","Polster","Yolk Syncytial Layer")
+
+cellchat <- updateClusterLabels(cellchat, new.order = cell.levels)
+
+
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+```
+
+```{r}
+groupSize <- as.numeric(table(cellchat@idents))
+
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(cellchat@net$count, vertex.weight = rowSums(cellchat@net$count), weight.scale = T, label.edge= F, title.name = "Number of interactions")
+
+netVisual_circle(cellchat@net$weight, vertex.weight = rowSums(cellchat@net$weight), weight.scale = T, label.edge= F, title.name = "Interaction weights/strength",color.use = c("#7f3b08","#91EA54","#bd0026","#5A5156","#FEAF16","#BBA1CB","#009200","#6E9BC5","#f1b6da","#fff000","#2ED9FF","grey"))
+
+```
+
+```{r}
+cellchat@netP$pathways
+pathways.show <- c("ACTIVIN") 
+
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "circle")
+```
+
+```{r}
+cellchat@netP$pathways
+pathways.show <- c("BMP") 
+
+# Spatial plot
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "spatial", edge.width.max = 2, vertex.size.max = 1, alpha.image = 0.2, vertex.label.cex = 3.5) +
+  theme(legend.position= "none",
+         axis.title.x=element_blank(),
+         axis.line.x = element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.line.y = element_blank())
+  
+
+cell.levels <- c("blank","Segmental Plate, Tail Bud","Anterior Neural Keel","Paraxial Mesoderm, Neural Keel","Notochord","Posterior Neural Keel","Periderm","Polster","Yolk Syncytial Layer")
+```
+
+### Selection tail slice
+```{r}
+plot(seurat_zf10$x_3,seurat_zf10$y_3)
+
+
+subset2 <- subset(seurat_zf10, subset = x_3 > 530)
+subset2 <- subset(subset2, subset = x_3 <  550)
+
+SpatialFeaturePlot(subset2, feature = c("tbxta"), alpha =  c(0.1, 1),pt.size.factor = 4,image.alpha = 0,stroke = 0.01) + ggplot2::theme_classic() +
+   theme(legend.position= "none",
+         axis.title.x=element_blank(),
+         axis.line.x = element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.line.y = element_blank())
+
+ggplot(subset2@meta.data %>% as.data.frame(),aes(x=z_3, y=y_4, color=bin_annotation)) +
+  geom_point(size=1) 
+
+```
+
+
+#### Prepare input data for CelChat analysis
+```{r}
+
+data.input = GetAssayData(subset2, slot = "data", assay = "RNA") 
+Idents(subset2) <- subset2$bin_annotation
+
+meta = data.frame(labels = Idents(subset2), row.names = names(Idents(subset2)))
+
+unique(meta$labels)
+
+spatial.locs = GetTissueCoordinates(subset2, scale = NULL, cols = c("z_3", "y_3")) 
+spatial.locs <- spatial.locs[,3:2] 
+colnames(spatial.locs) <- c("x","y")
+
+spatial.locs$x <-  as.integer(spatial.locs$x)
+spatial.locs$y <-  as.integer(spatial.locs$y)
+
+scale.factors = list(spot.diameter = 15, spot = 225)
+```
+
+#### Create CellChat object
+```{r}
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels",
+                           datatype = "spatial", coordinates = spatial.locs,scale.factors = scale.factors)
+
+CellChatDB <- CellChatDB.zebrafish
+CellChatDB.use <- CellChatDB
+cellchat@DB <- CellChatDB.use
+```
+
+```{r}
+cellchat <- subsetData(cellchat)
+cellchat <- identifyOverExpressedGenes(cellchat)
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean", trim = 0.1, 
+                               distance.use = TRUE, interaction.length = 200, scale.distance = 1)
+
+cell.levels <- c("blank", "Segmental Plate, Tail Bud", "Anterior Neural Keel","Paraxial Mesoderm, Neural Keel", "Notochord","Posterior Neural Keel","Periderm", "Polster" , "Yolk Syncytial Layer")
+
+cellchat <- updateClusterLabels(cellchat, new.order = cell.levels)
+
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+
+cellchat <- computeCommunProbPathway(cellchat)
+cellchat <- aggregateNet(cellchat)
+```
+
+```{r}
+groupSize <- as.numeric(table(cellchat@idents))
+
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_circle(cellchat@net$count, vertex.weight = rowSums(cellchat@net$count), weight.scale = T, label.edge= F, title.name = "Number of interactions")
+
+netVisual_circle(cellchat@net$weight, vertex.weight = rowSums(cellchat@net$weight), weight.scale = T, label.edge= F, title.name = "Interaction weights/strength")
+```
+
+```{r}
+cellchat@netP$pathways
+pathways.show <- c("ncWNT") 
+
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "circle")
+```
+
+```{r}
+# Spatial plot
+par(mfrow=c(1,1))
+netVisual_aggregate(cellchat, signaling = pathways.show, layout = "spatial", edge.width.max = 2, vertex.size.max = 1, alpha.image = 0.2, vertex.label.cex = 3.5) +
+  theme(legend.position= "none",
+         axis.title.x=element_blank(),
+         axis.line.x = element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        axis.line.y = element_blank())
+```

@@ -1,0 +1,491 @@
+---
+title: "4. ST and bulk slice alignment (correlation)"
+author: "Yang"
+date: '2022-12-12'
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+### Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r packages}
+library(limma)
+library(Seurat)
+library(readr)
+library(edgeR)
+library(tidyverse)
+library(magrittr)
+library(SingleCellExperiment)
+library(Matrix.utils)
+library(reshape2)
+library(ggalt)
+library(ggtext)
+
+
+theme_set(theme_bw())
+panderOptions("big.mark", ",")
+panderOptions("table.split.table", Inf)
+panderOptions("table.style", "rmarkdown")
+if (interactive()) setwd(here::here("analysis"))
+```
+
+### data load
+```{r}
+# load reconstructed zf12 embryo
+zf10_st <- read_rds(here::here("output","zf10","zf10_st_seurat_filtered.rds"))
+
+# load bulk RNA-seq data
+S10_2_dgeList <- readRDS(here::here("output","S10_2_dgeList.rds"))
+
+```
+
+
+```{r}
+Stereo <- zf10_st
+bulk <- S10_2_dgeList[,7:25]
+
+n <- 19
+genes <- c("tbxta","rx3","lft1","cdx4","shha","gsc")
+
+bulk_mid_gene <- bulk$genes %>%
+  dplyr::filter(external_gene_name %in% genes) %>%
+  dplyr::select(ensembl_gene_id, external_gene_name)
+
+bulk_mid <- bulk %>%
+	cpm.default(log = TRUE) %>%
+	.[bulk_mid_gene$ensembl_gene_id,] %>%
+  cbind(bulk_mid_gene) %>% 
+  rownames_to_column() %>%
+  column_to_rownames(., "external_gene_name") %>%
+  dplyr::select(-rowname,-ensembl_gene_id) %>%
+  t() %>%
+  cbind(position = bulk$sample$position) %>%
+  as.data.frame()
+
+bulk_mid_scaled <- bulk_mid %>%
+  dplyr::select(-position) %>%
+  scale() %>%
+  as.data.frame() %>%
+  rownames_to_column() %>%
+  dplyr::select(-rowname) %>%
+  rownames_to_column(var="position")
+bulk_mid_scaled_1 <- melt(bulk_mid_scaled, id.vars= "position")
+```
+
+
+### max correlation calculation 
+```{r rotate around center}
+# [!seq(5,355,5) %in% 180]
+cor.test <- data.frame()
+cor.test_final <- data.frame(matrix(ncol = 0, nrow = 3))
+
+### rotating the ST data along two axis to find the best correlation
+for (x in seq(-3,3,1)) {
+  for (y in seq(-30,30,1)) {
+
+# rotate along x-axis
+res <- Stereo@meta.data
+y_mid_1 <- (max(res$spatial_y_adjusted) + min(res$spatial_y_adjusted))/2
+z_mid_1 <- (max(res$spatial_z_adjusted) + min(res$spatial_z_adjusted))/2
+# centre point(0,0,448.5)
+a <- x * pi / 180
+res$spatial_y_adjusted_2 = cos(a) * (res$spatial_y_adjusted-y_mid_1) - sin(a) * (res$spatial_z_adjusted - z_mid_1) + y_mid_1
+
+res$spatial_z_adjusted_2 = sin(a) * (res$spatial_y_adjusted-y_mid_1) + cos(a) * (res$spatial_z_adjusted - z_mid_1) + z_mid_1
+
+res$spatial_x_adjusted_2 <- res$spatial_x_adjusted
+
+Stereo@meta.data$spatial_x_adjusted_2 <- res$spatial_x_adjusted_2
+Stereo@meta.data$spatial_y_adjusted_2 <- res$spatial_y_adjusted_2
+Stereo@meta.data$spatial_z_adjusted_2 <- res$spatial_z_adjusted_2
+
+# rotate along y-axis
+
+b <- y * pi / 180
+x_mid_2 <- (max(res$spatial_x_adjusted_2)+min(res$spatial_x_adjusted_2))/2
+z_mid_2 <- (max(res$spatial_z_adjusted_2)+min(res$spatial_z_adjusted_2))/2
+
+res$spatial_z_adjusted_3 = cos(b) * (res$spatial_z_adjusted_2-z_mid_2) - sin(b) * (res$spatial_x_adjusted_2 - x_mid_2) + z_mid_2
+
+res$spatial_x_adjusted_3 = sin(b) * (res$spatial_z_adjusted_2-z_mid_2) + cos(b) * (res$spatial_x_adjusted_2 - x_mid_2) + x_mid_2
+res$spatial_y_adjusted_3 <- res$spatial_y_adjusted_2
+
+Stereo@meta.data$spatial_x_adjusted_3 <- res$spatial_x_adjusted_3
+Stereo@meta.data$spatial_y_adjusted_3 <- res$spatial_y_adjusted_3
+Stereo@meta.data$spatial_z_adjusted_3 <- res$spatial_z_adjusted_3
+
+
+z_length <- max(res$spatial_z_adjusted_3) - min(res$spatial_z_adjusted_3)
+each_slice_length <- z_length/n
+
+
+z <- list()
+
+
+for(i in 1:n) {
+  Stereo_slice_1 <- Stereo@meta.data %>%
+    dplyr::filter(Stereo@meta.data$spatial_z_adjusted_3 < (min(res$spatial_z_adjusted_3) + each_slice_length*i)  & Stereo@meta.data$spatial_z_adjusted_3 >= (min(res$spatial_z_adjusted_3)+ each_slice_length*(i-1))) 
+  z[i] <- print(Stereo_slice_1 %>% list())
+}
+
+
+res_fixed <- do.call(rbind,z)
+
+
+Gene_number <- length(rownames(Stereo@assays$RNA@counts))
+
+sum_count <- function(seurat_object){
+  object <- matrix(NA, nrow = Gene_number, ncol = n)
+  for (i in 1:n) {
+  filter_object <- seurat_object[,colnames(seurat_object) %in% rownames(z[i] %>% as.data.frame())] 
+  sum <- colSums(t((filter_object@assays$RNA@counts))) %>%
+    as.data.frame() %>%
+    rownames_to_column() %>%
+    dplyr::select(Gene=rowname, Counts = '.')
+ object[,i] <- sum$Counts
+  }
+  return(object)
+}
+
+skip_to_next <- FALSE
+tryCatch(
+slice_counts <- sum_count(Stereo) %>% as.data.frame() 
+,error = function(e) { skip_to_next <<- TRUE})
+
+
+rownames(slice_counts) <- rownames(Stereo@assays$RNA@counts)
+colnames(slice_counts) <- c(1:n) %>% as.numeric()
+
+
+gene_of_interest <- slice_counts %>%
+  rownames_to_column() %>%
+  dplyr::filter(rowname %in% genes) %>%
+  dplyr::select(rowname)
+
+Stereo_midline <- DGEList(slice_counts) %>%
+  cpm.default(log = TRUE) %>%
+	.[gene_of_interest$rowname,] %>%
+	as.matrix() %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column() 
+
+Stereo_midline_matrix <- Stereo_midline[, genes]
+Stereo_midline_matrix <- Stereo_midline_matrix %>%
+  scale() %>%
+  t() %>%
+  as.matrix() 
+
+
+bulk_mid_matrix <- bulk_mid[, genes]
+bulk_mid_matrix <- bulk_mid_matrix %>% 
+  scale() %>%
+  t() %>%
+  as.matrix()
+
+output <- data.frame(row.names = colnames(Stereo_midline_matrix))
+p.val <- data.frame(row.names = colnames(Stereo_midline_matrix))
+for (j in 1:ncol(Stereo_midline_matrix)) {
+  for (i in 1:ncol(bulk_mid_matrix)) {
+    a <- cor.test(Stereo_midline_matrix[,j], bulk_mid_matrix[,i], method = "pearson") 
+    output[j,i] <- a$estimate
+    p.val[j,i] <- a$p.value
+    colnames(output)[i] <- colnames(bulk_mid_matrix)[i]
+    colnames(p.val)[i] <- colnames(bulk_mid_matrix)[i]
+  }
+}
+
+cor <- data.frame()
+for (i in 1:n){
+    cor <- cor %>% rbind(output[i,i] %>% as.data.frame()) %>%
+      na.omit()
+  }
+
+### As the outermost slices are incomplete, we use the mid slices for correlation calculation.
+cor.test[1,1] <- x
+cor.test[2,1] <- y
+cor.test[3,1] <- mean(cor$.[6:15])
+
+
+cor.test_final <- cor.test_final %>%
+  cbind(cor.test)
+  if(skip_to_next) { next }  
+  }
+}
+max(cor.test_final[3,])
+
+
+optimal <- cor.test_final %>%
+  t() %>%
+  as.data.frame() 
+colnames(optimal) <- c("x","y","cor")
+max(optimal$cor)
+# 0.671698349
+optimal %>%
+  as.data.frame() %>%
+  dplyr::filter(.$cor == max(optimal$cor))
+
+```
+
+```{r}
+res <- Stereo@meta.data
+y_mid_1 <- (max(res$spatial_y_adjusted) + min(res$spatial_y_adjusted))/2
+z_mid_1 <- (max(res$spatial_z_adjusted) + min(res$spatial_z_adjusted))/2
+
+a <- -1 * pi / 180
+res$spatial_y_adjusted_2 = cos(a) * (res$spatial_y_adjusted-y_mid_1) - sin(a) * (res$spatial_z_adjusted - z_mid_1) + y_mid_1
+
+res$spatial_z_adjusted_2 = sin(a) * (res$spatial_y_adjusted-y_mid_1) + cos(a) * (res$spatial_z_adjusted - z_mid_1) + z_mid_1
+
+res$spatial_x_adjusted_2 <- res$spatial_x_adjusted
+
+Stereo@meta.data$spatial_x_adjusted_2 <- res$spatial_x_adjusted_2
+Stereo@meta.data$spatial_y_adjusted_2 <- res$spatial_y_adjusted_2
+Stereo@meta.data$spatial_z_adjusted_2 <- res$spatial_z_adjusted_2
+
+b <- -28 * pi / 180
+x_mid_2 <- (max(res$spatial_x_adjusted_2)+min(res$spatial_x_adjusted_2))/2
+z_mid_2 <- (max(res$spatial_z_adjusted_2)+min(res$spatial_z_adjusted_2))/2
+
+res$spatial_z_adjusted_3 = cos(b) * (res$spatial_z_adjusted_2-z_mid_2) - sin(b) * (res$spatial_x_adjusted_2 - x_mid_2) + z_mid_2
+
+res$spatial_x_adjusted_3 = sin(b) * (res$spatial_z_adjusted_2-z_mid_2) + cos(b) * (res$spatial_x_adjusted_2 - x_mid_2) + x_mid_2
+res$spatial_y_adjusted_3 <- res$spatial_y_adjusted_2
+
+Stereo@meta.data$spatial_x_adjusted_3 <- res$spatial_x_adjusted_3
+Stereo@meta.data$spatial_y_adjusted_3 <- res$spatial_y_adjusted_3
+Stereo@meta.data$spatial_z_adjusted_3 <- res$spatial_z_adjusted_3
+
+
+z_length <- max(res$spatial_z_adjusted_3) - min(res$spatial_z_adjusted_3)
+each_slice_length <- z_length/n
+
+
+z <- list()
+
+
+for(i in 1:n) {
+  Stereo_slice_1 <- Stereo@meta.data %>%
+    dplyr::filter(Stereo@meta.data$spatial_z_adjusted_3 < (min(res$spatial_z_adjusted_3) + each_slice_length*i)  & Stereo@meta.data$spatial_z_adjusted_3 >= (min(res$spatial_z_adjusted_3)+ each_slice_length*(i-1))) 
+  z[i] <- print(Stereo_slice_1 %>% list())
+}
+
+
+res_fixed <- do.call(rbind,z)
+
+
+Gene_number <- length(rownames(Stereo@assays$RNA@counts))
+
+sum_count <- function(seurat_object){
+  object <- matrix(NA, nrow = Gene_number, ncol = n)
+  for (i in 1:n) {
+  filter_object <- seurat_object[,colnames(seurat_object) %in% rownames(z[i] %>% as.data.frame())] 
+  sum <- colSums(t((filter_object@assays$RNA@counts))) %>%
+    as.data.frame() %>%
+    rownames_to_column() %>%
+    dplyr::select(Gene=rowname, Counts = '.')
+ object[,i] <- sum$Counts
+  }
+  return(object)
+}
+
+skip_to_next <- FALSE
+tryCatch(
+slice_counts <- sum_count(Stereo) %>% as.data.frame() 
+,error = function(e) { skip_to_next <<- TRUE})
+
+slice_counts/n
+rownames(slice_counts) <- rownames(Stereo@assays$RNA@counts)
+colnames(slice_counts) <- c(1:n) %>% as.numeric()
+
+
+gene_of_interest <- slice_counts %>%
+  rownames_to_column() %>%
+  dplyr::filter(rowname %in% genes) %>%
+  dplyr::select(rowname)
+
+Stereo_midline <- slice_counts %>%
+  cpm.default(log = TRUE) %>%
+	.[gene_of_interest$rowname,] %>%
+	as.matrix() %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column() 
+
+Stereo_midline_matrix <- Stereo_midline[, genes]
+
+Stereo_midline_matrix <- Stereo_midline_matrix %>%
+  scale() %>%
+  t() %>%
+  as.matrix() 
+
+
+bulk_mid_matrix <- bulk_mid[, genes]
+bulk_mid_matrix <- bulk_mid_matrix %>% 
+  scale() %>%
+  t() %>%
+  as.matrix()
+
+output <- data.frame(row.names = colnames(Stereo_midline_matrix))
+p.val <- data.frame(row.names = colnames(Stereo_midline_matrix))
+for (j in 1:ncol(Stereo_midline_matrix)) {
+  for (i in 1:ncol(bulk_mid_matrix)) {
+    a <- cor.test(Stereo_midline_matrix[,j], bulk_mid_matrix[,i], method = "pearson") 
+    output[j,i] <- a$estimate
+    p.val[j,i] <- a$p.value
+    colnames(output)[i] <- colnames(bulk_mid_matrix)[i]
+    colnames(p.val)[i] <- colnames(bulk_mid_matrix)[i]
+  }
+}
+cor <- data.frame()
+for (i in 1:n){
+    cor <- cor %>% rbind(output[i,i] %>% as.data.frame()) %>%
+      na.omit()
+  }
+mean(cor$.[6:15])
+
+pheatmap::pheatmap(output[6:15,6:15],
+                   cluster_rows=FALSE,
+                   cluster_cols=FALSE,
+                   cellwidth = 25,
+                   cellheight = 25
+                   )
+
+```
+
+### after adjustment
+```{r}
+gene <- c("tbxta")
+
+Stereo_midline_scaled <- Stereo_midline %>%
+  dplyr::select(-rowname) %>%
+  scale() %>%
+  as.data.frame() %>%
+  rownames_to_column(var="position")
+
+Stereo_midline_scaled_1 <- melt(Stereo_midline_scaled, id.vars= "position") %>%
+  dplyr::filter(.$variable == gene)  %>%
+  dplyr::select(-variable) %>%
+  dplyr::mutate(variable = "Stereo-seq")
+
+bulk_mid_scaled <- bulk_mid %>%
+  dplyr::select(-position) %>%
+  scale() %>%
+  as.data.frame() %>%
+  rownames_to_column() %>%
+  dplyr::select(-rowname) %>%
+  rownames_to_column(var="position")
+
+bulk_mid_scaled_1 <- melt(bulk_mid_scaled, id.vars= "position")
+bulk_mid_scaled_1 <- bulk_mid_scaled_1 %>%
+  dplyr::filter(.$variable == gene)  %>%
+  dplyr::select(-variable) %>%
+  dplyr::mutate(variable = "DreAM")
+
+t <- Stereo_midline_scaled_1 %>%
+  rbind(bulk_mid_scaled_1)
+t$position <- t$position %>%
+  as.numeric()
+
+ggplot(data = t, aes(position, y = value, col=variable)) +
+  geom_smooth(se=FALSE, linetype="solid", size=1, span = 0.3) +
+  labs(x="Position", y="z-score" ) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"),legend.position = "none") +
+  theme(plot.title = element_markdown(box.color = "black",
+                                      linewidth = 0.5,
+                                      r = unit(0, "mm"), linetype = 1,
+                                      padding = unit(3, "mm"),
+                                      hjust = 0.5,
+                                      size = 12,
+                                      face='bold')) +
+  xlim(0.5, 19.5) +
+  ylim(-2.5,2.5)  +
+  scale_x_continuous(breaks=seq(1,n,6), labels=seq(1,n,6),limits=c(1,n)) +
+  coord_fixed(ratio = 2, xlim = NULL, ylim = NULL, expand = TRUE, clip = "on") +
+  scale_color_manual(values = c("#F8766D",
+                              "#3366ff"))
+
+```
+
+### before adjustment
+
+```{r}
+Stereo_sce <- SingleCellExperiment(assays = list(counts = Stereo@assays$RNA@counts), 
+                           colData = Stereo@meta.data)
+
+groups <- colData(Stereo_sce)[, c("slice")]
+Stereo_slice_sum <- aggregate.Matrix(t(counts(Stereo_sce)), 
+                       groupings = groups, fun = "sum")
+
+
+
+Stereo_slice_sum_t <- DGEList(Stereo_slice_sum %>% t()) %>%
+  cpm.default() %>%
+  t() %>%
+  scale() %>% 
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column() %>%
+  dplyr::filter(.$rowname %in% gene_of_interest$rowname) %>%
+  column_to_rownames(var="rowname") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var="position")
+
+Stereo_slice_sum_t_1 <- melt(Stereo_slice_sum_t,id.vars = "position") %>%
+  dplyr::filter(.$variable == gene)  %>%
+  dplyr::select(-variable) %>%
+  dplyr::mutate(variable = "Stereo-seq")
+
+Stereo_slice_sum_t_1$position <- Stereo_slice_sum_t_1$position %>% as.numeric()
+# Stereo_slice_sum_t_1$position <- ((Stereo_slice_sum_t_1$position %>% as.numeric())-6)/6 * n
+
+t <- Stereo_slice_sum_t_1 %>%
+  rbind(bulk_mid_scaled_1)
+t$position <- t$position %>%
+  as.numeric()
+
+ggplot() +
+	geom_xspline(data = t, aes(position, y = value, col=variable),spline_shape = 0, size = 1.2) +
+  scale_x_continuous(breaks=seq(1,n,3), labels=seq(1,n,3),limits=c(0.75,n)) +
+  guides(fill = FALSE) +
+  labs(title=print(gene),x="Position", y="z-score",color = print(gene))  +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+ggplot(data = t, aes(position, y = value, col=variable)) +
+  geom_smooth(se=FALSE, linetype="solid", size=1, span = 0.3) +
+  labs( x="Position", y="z-score",color = print(gene))  +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black"),legend.position = "none") +
+  theme(plot.title = element_markdown(box.color = "black",
+                                      linewidth = 0.5,
+                                      r = unit(0, "mm"), linetype = 1,
+                                      padding = unit(3, "mm"),
+                                      hjust = 0.5,
+                                      size = 12,
+                                      face='bold')) +
+  xlim(0.5, 19.5) +
+  ylim(-2.5,2.5)  +
+  scale_x_continuous(breaks=seq(1,n,6), labels=seq(1,n,6),limits=c(1,n)) +
+  coord_fixed(ratio = 2, xlim = NULL, ylim = NULL, expand = TRUE, clip = "on") +
+  scale_color_manual(values = c("#F8766D",
+                              "#ff66ff"))
+```
+
+
+### save temp files for Palette implementation
+```{r save data}
+write_rds(Stereo, here::here("output","temp","Stereo.rds"), compress = "gz")
+write_rds(z,here::here("output","temp","spots_in_slices.rds"), compress = "gz")
+write_rds(slice_counts, here::here("output","temp","slice_counts.rds"), compress = "gz")
+```
+
+
+

@@ -1,0 +1,247 @@
+---
+title: "8. Linearize AP axis and hox score"
+author: "Yang, Tao"
+date: "2023-12-08"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+### Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(fitdistrplus)
+library(magrittr)
+library(reshape)
+library(ggalt)
+library(Hmisc)
+library(ggpointdensity)
+library(ggpmisc)
+```
+
+### load data
+```{r}
+seurat_zf10 <- readRDS(here::here("output","zf10_final_version.rds"))
+```
+
+### Rotate the data for linearization
+```{r}
+subset <-  subset(seurat_zf10, subset = bin_annotation == "blank" | bin_annotation == "Yolk Syncytial Layer" | bin_annotation == "Periderm",invert = TRUE)
+
+a <- -150 * pi / 180
+y2 <- subset$y_3*cos(a) + subset$x_3*sin(a)
+x2 <- -subset$y_3*sin(a) + subset$x_3*cos(a)
+
+subset$y_4 <- y2 
+subset$x_4 <- x2 
+plot(subset$x_4,subset$y_4)
+
+df <- data.frame(subset$x_4,subset$y_4)
+colnames(df) <- c("x","y")
+ggplot(df,aes(df$x, df$y,color = df$col)) +
+  geom_point() +
+  geom_vline(xintercept = 0.1294344)
+```
+
+### Fit the data into a cycle and project the spots onto the cycle
+```{r}
+
+f = fitSS(df)
+
+plot(df)
+lines(circlexy(f$par))
+
+### The closest spot on the circle 
+cX <- 0.1294344 
+cY <- 33.8312822
+R <- 521.7949497
+pX <- df$x
+pY <- df$y
+
+vX = pX - cX
+vY = pY - cY
+magV = sqrt(vX*vX + vY*vY)
+aX = cX + vX / magV * R
+aY = cY + vY / magV * R
+```
+
+### Use arc length as the distance
+```{r}
+# Function to calculate the counterclockwise arc length
+clockwise_arc_length <- function(x, y) {
+  # Calculate the angle of the specific spot
+  theta_spot <- atan2(cY+R - cY, cX - cX)
+  
+  # Calculate the angle of the current point
+  theta_point <- atan2(y - cY, x - cX)
+  
+  # Adjust the difference in angles to be in the range [0, 2*pi)
+  delta_theta <- (theta_spot - theta_point) %% (2 * pi)
+  
+  # Calculate the counterclockwise arc length using the adjusted difference in angles and the radius
+  arc_length <- R * delta_theta
+  
+  return(arc_length)
+}
+points <- data.frame(x = aX,y=aY)
+
+arc_lengths <- sapply(1:nrow(points), function(i) clockwise_arc_length(points[i, "x"], points[i, "y"]))
+
+subset$pesudo_AP_x <- arc_lengths
+
+ggplot(subset@meta.data,aes(subset$pesudo_AP_x, runif(10227, min=0, max=1),color = subset$bin_annotation)) +
+  geom_point() +
+  ylim(-0.5,1.5)
+
+
+saveRDS(subset, here::here("output","temp","zf10_subset_linearizeAP.rds"))
+
+```
+
+### Define hox score and calculate the correlation between hox score and AP position
+```{r}
+subset <- readRDS(here::here("output","temp","zf10_subset_linearizeAP.rds"))
+
+SpatialFeaturePlot(subset, feature = c("hoxb10a"), alpha =  c(0.1, 1),pt.size.factor = 4,image.alpha = 0,stroke = 0.01) + ggplot2::theme_classic() +
+  scale_fill_gradientn(colors=alpha(c("lightgrey","darkblue"), 1)) 
+
+hox_df <- subset@assays$RNA@data[grep('hox[a-z]\\d+[a-z]+$', rownames(subset@assays$RNA@data), value=TRUE),] %>% as.data.frame() %>% 
+  t() %>% 
+  as.data.frame() %>%
+  dplyr::select(-hoxc3a) %>% as.matrix()
+
+colnames(hox_df) <- sub("hox[a-z](\\d+).+", "\\1", colnames(hox_df)) 
+hox_df <- hox_df[ ,order(colnames(hox_df))]
+hox_df <- hox_df[,colSums(hox_df)>0]
+
+for (i in 1:length(colnames(hox_df))) {
+  hox_df[,i] <- hox_df[,i]/max(hox_df[,i])
+}
+
+hox_df_filtered <- hox_df[rowSums(hox_df[])> 0.1,]
+
+Index_all <- NULL
+
+for (i in 1:length(rownames(hox_df_filtered))){
+df <- data_frame(x=colnames(hox_df_filtered),
+                 y=hox_df_filtered[i,])  
+df$x <- df$x %>% as.numeric()
+density <- NULL
+for (j in 1:length(df$x)) {
+density_row <- rep(df[j,]$x,(df[j,2] * 100) %>% as.integer()) 
+density <- c(density, density_row)
+}
+if (length(unique(density)) > 1){
+fit <- fitdist(density, "norm")
+Index <- fit$estimate %>% as.data.frame() %>% .[1,] %>% t() %>%
+  set_colnames("hox_Index") 
+rownames(Index) <- rownames(hox_df_filtered)[i]
+} else {
+  Index <- unique(density) %>% as.data.frame() %>% set_colnames("hox_Index") 
+rownames(Index)  <- rownames(hox_df_filtered)[i]
+}
+Index_all <- Index_all %>% 
+  rbind(Index)
+}
+
+Index_merge <- Index_all %>% rownames_to_column(var = "st_spots") %>%
+  left_join(subset@meta.data %>% rownames_to_column(var = "st_spots") %>% dplyr::select(st_spots, pesudo_AP_x))
+Index_merge$normalized_AP <- (Index_merge$pesudo_AP_x - min(Index_merge$pesudo_AP_x))/(max(Index_merge$pesudo_AP_x) - min(Index_merge$pesudo_AP_x))
+Index_merge$normalized_hox_Index <- Index_merge$hox_Index/13
+
+subset@meta.data <- subset@meta.data %>% 
+  rownames_to_column(var = "st_spots") %>% 
+  left_join(Index_merge %>% 
+              dplyr::select(-pesudo_AP_x))
+rownames(subset@meta.data) <- subset@meta.data$st_spots
+
+
+res <- rcorr(subset@meta.data %>% filter(normalized_AP>0.2) %>% .$normalized_AP, subset@meta.data %>% filter(normalized_AP>0.2) %>% .$normalized_hox_Index)
+p_value <- res$P[1,2]
+cor_value <- round(res$r[1,2], 2)
+
+ggplot(subset@meta.data %>% filter(normalized_AP>0.2), aes(x=normalized_AP, y=normalized_hox_Index))+ geom_pointdensity(adjust=0.1,show.legend = TRUE) +
+  scale_colour_gradientn(colours=c("darkblue","blue","#0092FF","#00FF92","#49FF00","#FFDB00","#FF0000","red","darkred")) +
+  geom_smooth(method = "lm",formula = y~x,color="black",fill = "grey",alpha = 0.8) + theme_bw() + 
+  theme(legend.position = "none", panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + labs(title = paste0("R = ", cor_value))
+```
+
+### Assess correlations in neural cells
+```{r}
+subset <- readRDS(here::here("output","temp","zf10_subset_linearizeAP.rds"))
+
+seurat_zf10_neural <- subset(subset, subset = bin_annotation == "Anterior Neural Keel" | bin_annotation == "Posterior Neural Keel" | bin_annotation == "Paraxial Mesoderm, Neural Keel")
+
+
+seurat_zf10_neural@meta.data <- seurat_zf10_neural@meta.data %>% 
+  rownames_to_column(var = "st_spots") %>% 
+  left_join(Index_merge %>% 
+              dplyr::select(-pesudo_AP_x))
+rownames(seurat_zf10_neural@meta.data) <- seurat_zf10_neural@meta.data$st_spots
+
+
+res <- rcorr(seurat_zf10_neural@meta.data %>% filter(normalized_AP>0.2) %>% .$normalized_AP, seurat_zf10_neural@meta.data %>% filter(normalized_AP>0.2) %>% .$normalized_hox_Index)
+p_value <- res$P[1,2]
+cor_value <- round(res$r[1,2], 2)
+
+ggplot(seurat_zf10_neural@meta.data %>% filter(normalized_AP>0.2), aes(x=normalized_AP, y=normalized_hox_Index))+ geom_pointdensity(adjust=0.1,show.legend = TRUE) +
+  scale_colour_gradientn(colours=c("darkblue","blue","#0092FF","#00FF92","#49FF00","#FFDB00","#FF0000","red","darkred")) +
+  geom_smooth(method = "lm",formula = y~x,color="black",fill = "grey",alpha = 0.8) + theme_bw() + 
+  theme(legend.position = "none", panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + labs(title = paste0("R = ", cor_value))
+```
+
+### Assess correlations in PM system
+```{r}
+seurat_zf10_somite <- subset(subset, subset = bin_annotation == "Segmental Plate, Tail Bud" | bin_annotation == "Paraxial Mesoderm, Neural Keel" )
+
+seurat_zf10_somite@meta.data <- seurat_zf10_somite@meta.data %>% 
+  rownames_to_column(var = "st_spots") %>% 
+  left_join(Index_merge %>% 
+              dplyr::select(-pesudo_AP_x))
+rownames(seurat_zf10_somite@meta.data) <- seurat_zf10_somite@meta.data$st_spots
+
+
+res <- rcorr(seurat_zf10_somite@meta.data %>% filter(normalized_AP>0.2) %>% .$normalized_AP, seurat_zf10_somite@meta.data %>% filter(normalized_AP>0.2) %>% .$normalized_hox_Index)
+p_value <- res$P[1,2]
+cor_value <- round(res$r[1,2], 2)
+
+ggplot(seurat_zf10_somite@meta.data %>% filter(normalized_AP>0.2), aes(x=normalized_AP, y=normalized_hox_Index))+ geom_pointdensity(adjust=0.1,show.legend = TRUE) +
+  scale_colour_gradientn(colours=c("darkblue","blue","#0092FF","#00FF92","#49FF00","#FFDB00","#FF0000","red","darkred")) +
+  geom_smooth(method = "lm",formula = y~x,color="black",fill = "grey",alpha = 0.8) + theme_bw() + 
+  theme(legend.position = "none", panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + labs(title = paste0("R = ", cor_value))
+```
+
+
+```{r}
+fitSS <- function(xy,
+                  a0=mean(xy[,1]),
+                  b0=mean(xy[,2]),
+                  r0 = mean(sqrt((xy[,1]-a0)^2 + (xy[,2]-b0)^2)),
+                  ...){
+    SS <- function(abr){
+        sum((abr[3] - sqrt((xy[,1]-abr[1])^2 + (xy[,2]-abr[2])^2))^2)
+    }
+    optim(c(a0,b0,r0), SS, ...)
+}
+
+circlexy <- function(xyr, n=180){
+    theta = seq(0,2*pi,len=n)
+    cbind(xyr[1] + xyr[3]*cos(theta),
+          xyr[2] + xyr[3]*sin(theta)
+          )
+}
+```

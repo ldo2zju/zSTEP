@@ -1,0 +1,216 @@
+---
+title: "2. Processing bulk RNA-seq data"
+author: "Yang"
+date: "2021-10-22"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+### Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r packages}
+library(limma)
+library(readr)
+library(edgeR)
+library(AnnotationHub)
+library(tidyverse)
+library(magrittr)
+library(pander)
+library(ggrepel)
+library(scales)
+library(plyr)
+library(purrr)
+
+theme_set(theme_bw())
+panderOptions("big.mark", ",")
+panderOptions("table.split.table", Inf)
+panderOptions("table.style", "rmarkdown")
+if (interactive()) setwd(here::here("analysis"))
+```
+
+```{r ensDb}
+ah <- AnnotationHub() %>%
+  subset(species == "Danio rerio") %>%
+  subset(dataprovider == "Ensembl") %>%
+  subset(rdataclass == "EnsDb")
+# Ensmbl 92 EnsDb as reference
+ensDb <- ah[["AH60966"]]
+genes <- genes(ensDb)
+transGR <- transcripts(ensDb)
+cols2keep <- c("gene_id", "gene_name", "gene_biotype", "entrezid","description","entrezid")
+mcols(genes) <- mcols(genes)[cols2keep] %>%
+  as.data.frame() %>%
+  dplyr::select(-entrezid) %>%
+  distinct(gene_id, .keep_all = TRUE) %>%
+  set_rownames(.$gene_id) %>%
+  DataFrame() %>%
+  .[names(genes),]
+genesGR <- genes(ensDb)
+```
+
+# Data import
+
+The trimmed reads was aligned using STAR to the *Danio rerio* genome included in Ensembl Release 92 (GRCz11).
+ 
+```{r import date}
+file_list <- list.files(here::here("data","S10_2"), pattern = "*.txt", full.names = T) 
+
+read_in_feature_counts <- function(file){
+        cnt <- read_tsv(file, col_names =T, comment = "#")
+        return(cnt)
+}
+raw_counts<- map(file_list, read_in_feature_counts)
+S10_2 <- purrr::reduce(raw_counts, inner_join) 
+```
+
+
+```{r setThresholds}
+minSamples <- 3
+minCpm <- 0.5
+```
+
+
+
+```{r counts}
+S10_2_counts <- S10_2 %>%
+  set_colnames(basename(colnames(.))) %>%
+  set_colnames(str_remove(colnames(.), "Aligned.+")) %>%
+  set_colnames(str_remove(colnames(.), ".combined")) %>%
+  gather(key = "Library", value = "Counts", -Geneid) %>%
+  dplyr::mutate(Sample = str_remove_all(Library, "Aligned.+")) %>%
+  group_by(Geneid, Sample) %>%
+  dplyr::summarise(Counts = sum(Counts)) %>%
+  tidyr::spread(key = "Sample", value = "Counts") %>%
+  as.data.frame() %>%
+  column_to_rownames("Geneid") 
+
+S10_2_genes2keep <- cpm.default(S10_2_counts) %>%
+  is_greater_than(minCpm) %>%
+  rowSums() %>%
+  is_weakly_greater_than(minSamples)
+
+
+plotDensities(cpm.default(S10_2_counts, log = TRUE), legend = FALSE, main = "a) All genes")
+plotDensities(cpm.default(S10_2_counts[S10_2_genes2keep,], log = TRUE), legend = FALSE, main = "b) Retained genes")
+```
+
+Genes were only retained if receiving more than `r minCpm` cpm in at least `r minSamples` samples.
+This filtering step discarded `r comma(sum(!S10_2_genes2keep))` genes as undetectable and retained `r comma(sum(S10_2_genes2keep))` genes for further analysis.
+
+```{r dgeList}
+S10_2_dgeList <- S10_2_counts %>%
+  .[S10_2_genes2keep,] %>%
+  DGEList(
+    samples = tibble(
+      sample = colnames(.),
+      position = str_replace_all(sample, "S10_2_([0-9])", "\\1"),
+      group = str_replace_all(sample, "(S10_2).+", "\\1")
+    ) %>%
+      as.data.frame(),
+		genes = genes[rownames(.)] %>%
+			as.data.frame() %>%
+			dplyr::select(
+				ensembl_gene_id = gene_id,
+				chromosome_name = seqnames,
+				description,
+				gene_biotype,
+				external_gene_name = gene_name,
+				entrez_gene = entrezid.1,
+			)
+	) %>%
+	calcNormFactors(method = "TMM") %>%
+	estimateDisp()
+
+S10_2_dgeList$samples$position <- as.numeric(as.character(S10_2_dgeList$samples$position))
+```
+
+# Data Inspection
+
+```{r pca}
+barplot(S10_2_dgeList$samples$lib.size,names = S10_2_dgeList$samples$position,las=2,col = "skyblue")
+title("Barplot of library sizes")
+
+S10_2_pca <- S10_2_dgeList[,-1] %>%
+  cpm.default(log = TRUE) %>%
+  t() %>%
+  prcomp()
+```
+
+```{r}
+summary(S10_2_pca)$importance %>% pander(split.tables = Inf)    
+```
+
+```{r plotPCA, echo=FALSE, fig.cap = "PCA of all samples."}
+S10_2_pca$x %>%
+	as.data.frame() %>%
+	rownames_to_column("sample") %>%
+	left_join(S10_2_dgeList$samples) %>%
+	ggplot(aes(PC1, PC2, colour = sample)) +
+	geom_point() +
+	labs(size = "Sample weight") +
+  xlab(paste0("PC1 (", percent(summary(S10_2_pca)$importance[2,"PC1"]), ")")) +
+  ylab(paste0("PC2 (", percent(summary(S10_2_pca)$importance[2,"PC2"]), ")")) +
+	theme(legend.title.align = 0.5)
+```
+
+# Plot gene of interests 
+### Plot midline genes along left-right axis
+```{r}
+library(reshape2)
+genes <- c("tbxta","lft1","gsc")
+
+
+S10_2_mid_gene <- S10_2_dgeList$genes %>%
+  dplyr::filter(external_gene_name %in% genes) %>%
+  dplyr::select(ensembl_gene_id, external_gene_name)
+
+S10_2_mid <- S10_2_dgeList %>%
+	cpm.default(log = TRUE) %>%
+	.[S10_2_mid_gene$ensembl_gene_id,] %>%
+  cbind(S10_2_mid_gene) %>% 
+  rownames_to_column() %>%
+  column_to_rownames(., "external_gene_name") %>%
+  dplyr::select(-rowname,-ensembl_gene_id) %>%
+  t() %>%
+  cbind(position = S10_2_dgeList$sample$position) %>%
+  as.data.frame()
+
+
+S10_2_mid_scaled <- S10_2_mid %>%
+  dplyr::select(-position) %>%
+  scale() %>%
+  as.data.frame() %>%
+  rownames_to_column() %>%
+  dplyr::select(-rowname) %>%
+  rownames_to_column(var="position")
+S10_2_mid_scaled_1 <- melt(S10_2_mid_scaled, id.vars= "position")
+S10_2_mid_scaled_1$position <- S10_2_mid_scaled_1$position %>% as.numeric()
+
+ggplot(data = S10_2_mid_scaled_1, aes(position, y = value, col=variable)) +
+  geom_line(linetype="solid", size=0.5) +
+  geom_point(size =0.5) +
+  labs(x="Position", y="logCPM" )  +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  scale_x_continuous(breaks=seq(1,28,4), labels=seq(1,28,4),limits=c(1,28)) +
+  coord_fixed(ratio = 3.5, xlim = NULL, ylim = NULL, expand = TRUE, clip = "on") +
+  scale_color_manual(values = c("#ff66ff",
+                              "#3366ff","#ff8c1a")) 
+```
+
+# Save data 
+```{r save data}
+write.csv(S10_2_counts,here::here("output", "S10_2_counts.csv"))
+write_rds(S10_2_dgeList, here::here("output", "S10_2_dgeList.rds"), compress = "gz")
+```
+
+
+
+

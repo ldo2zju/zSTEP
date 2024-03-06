@@ -1,0 +1,472 @@
+---
+title: "3. zf10 reconstruction"
+author: "Yang"
+date: '2022-11-08'
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+### Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r packages}
+library(limma)
+library(Seurat)
+library(readr)
+library(tidyverse)
+library(magrittr)
+library(SingleCellExperiment)
+library(Matrix.utils)
+library(edgeR)
+library(reshape2)
+
+
+theme_set(theme_bw())
+panderOptions("big.mark", ",")
+panderOptions("table.split.table", Inf)
+panderOptions("table.style", "rmarkdown")
+if (interactive()) setwd(here::here("analysis"))
+```
+
+### Seurat object construction
+```{r}
+# zf10_st_2 sample
+zf10_st_counts <- read.table(here::here("reference","stereoseq data","zf10_st","X.csv"), sep = ",")
+
+zf10_st_genename <- read.table(here::here("reference","stereoseq data","zf10_st","var.csv"),header = FALSE,sep = ",")
+colnames(zf10_st_counts) <- (zf10_st_genename$V1)[2:length(zf10_st_genename$V1)]
+
+zf10_st_metadata <- read.csv(here::here("reference","stereoseq data","zf10_st","obs.csv"))
+rownames(zf10_st_counts) <- zf10_st_metadata$X
+zf10_st_counts.matrix <- zf10_st_counts %>%
+  as.matrix() %>%
+  t()
+
+zf10_st <- CreateSeuratObject(counts = zf10_st_counts.matrix, project = "zf10_st")
+zf10_st <- SetAssayData(object = zf10_st, slot = 'scale.data', new.data = zf10_st_counts.matrix)
+zf10_st@meta.data$nCount_RNA <- zf10_st_metadata$nCount_RNA
+zf10_st@meta.data$nFeature_RNA <- zf10_st_metadata$nFeature_RNA
+zf10_st@meta.data$slice <- zf10_st_metadata$slice
+zf10_st@meta.data$spatial_x <- zf10_st_metadata$spatial_x
+zf10_st@meta.data$spatial_y <- zf10_st_metadata$spatial_y
+zf10_st@meta.data$time_point <- zf10_st_metadata$time_point
+zf10_st@meta.data$bin_annotation <- zf10_st_metadata$bin_annotation
+zf10_st@meta.data$colors <- zf10_st_metadata$colors
+zf10_st@meta.data$layer_annotation <- zf10_st_metadata$layer_annotation
+zf10_st@meta.data$layer_colors <- zf10_st_2_metadata$layer_colors
+
+zf10_st@meta.data$colors <- sub("#66B0FF","#009200",zf10_st@meta.data$colors) 
+
+write_rds(zf10_st, here::here("output","zf10","zf10_st_seurat.rds"), compress = "gz")
+```
+
+### Plot midline genes
+```{r}
+genes <- c("gsc","lft1","tbxta")
+
+zf10_st_sce <- SingleCellExperiment(assays = list(counts = zf10_st@assays$RNA@counts), 
+                           colData = zf10_st@meta.data)
+
+
+groups <- colData(zf10_st_sce)[, c("slice")]
+zf10_st_sum <- aggregate.Matrix(t(counts(zf10_st_sce)), 
+                       groupings = groups, fun = "sum") 
+
+
+zf10_st_sum_t <- DGEList(zf10_st_sum %>% t())  %>%
+  cpm.default(log = TRUE) %>%
+  as.data.frame() %>%
+  rownames_to_column() %>%
+  dplyr::filter(.$rowname %in% genes) %>%
+  column_to_rownames(var="rowname") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var="position")
+
+
+zf10_st_sum_t_1 <- melt(zf10_st_sum_t, id.vars= "position") 
+zf10_st_sum_t_1$position <- zf10_st_sum_t_1$position %>% as.numeric()
+
+
+ggplot(data = zf10_st_sum_t_1, aes(position, y = value, col=variable)) +
+  geom_line(linetype="solid", size=0.5) +
+  geom_point(size =0.5) +
+  labs(x="Position", y="logCPM" )  +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  scale_x_continuous(breaks=seq(1,26,4), labels=seq(1,26,4),limits=c(1,26)) +
+  coord_fixed(ratio = 2, xlim = NULL, ylim = NULL, expand = TRUE, clip = "on") +
+  scale_color_manual(values = c("#ff8c1a",
+                              "#ff66ff","#3366ff")) +
+  ylim(1,10)
+```
+
+
+### remove outliers
+```{r}
+removed_spots <- read_csv(here::here("output","zf10","zf10_removed_spots.csv"))
+zf10_st <- zf10_st[,!colnames(zf10_st) %in% removed_spots$.]
+```
+
+### Correct slice number
+```{r}
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "6"] <- "5"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "7"] <- "6"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "8"] <- "7"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "9"] <- "8"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "10"] <- "9"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "11"] <- "10"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "13"] <- "11"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "14"] <- "12"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "18"] <- "13"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "16"] <- "14"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "17"] <- "15"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "19"] <- "16"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "20"] <- "17"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "21"] <- "18"
+zf10_st@meta.data$slice[zf10_st@meta.data$slice == "24"] <- "19"
+```
+
+
+### angle adjustment
+```{r}
+### Put each slice into a similar coordinate system
+y <- list()
+for(i in as.numeric(levels(zf10_st$slice %>% as.factor()))) {
+  zf10_slice <- zf10_st@meta.data %>%
+    dplyr::filter(zf10_st@meta.data$slice == i) 
+  mid_x <- (min(zf10_slice$spatial_x) + max(zf10_slice$spatial_x))/2
+  mid_y <- (min(zf10_slice$spatial_y) + max(zf10_slice$spatial_y))/2
+  zf10_slice$spatial_x_adjusted <- zf10_slice$spatial_x - mid_x
+  zf10_slice$spatial_y_adjusted <- zf10_slice$spatial_y - mid_y
+  zf10_slice$spatial_z_adjusted <- 30*i
+  y[i] <- print(zf10_slice %>% list())
+}
+res <- do.call(rbind,y)
+
+### Adjust each slice
+z <- y[1] %>% as.data.frame() 
+a <- -z$spatial_y_adjusted
+b <- z$spatial_x_adjusted
+z$spatial_x_adjusted <- a -10
+z$spatial_y_adjusted  <- b -30
+a <- 20 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 60
+z$spatial_x_adjusted <- x2 - 20
+y[1] <- list(z)
+
+plot(y[1] %>% as.data.frame() %>% .$spatial_x_adjusted, y[1] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[2] %>% as.data.frame() 
+a <- -z$spatial_y_adjusted 
+b <- z$spatial_x_adjusted  
+z$spatial_x_adjusted <- a + 55
+z$spatial_y_adjusted <- b - 10
+z_select <- z %>%
+  dplyr::filter(spatial_x_adjusted < -180 & spatial_y_adjusted < 70 & spatial_y_adjusted > - 300) 
+plot(z_select %>% as.data.frame() %>% .$spatial_x_adjusted, z_select %>% as.data.frame() %>% .$spatial_y_adjusted)
+z_select$spatial_x_adjusted <- z_select$spatial_x_adjusted - 120
+z[rownames(z_select),c("spatial_x_adjusted","spatial_y_adjusted")] <- c(z_select$spatial_x_adjusted, z_select$spatial_y_adjusted)
+a <- 30 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 40
+z$spatial_x_adjusted <- x2 -70
+y[2] <- list(z)
+plot(y[2] %>% as.data.frame() %>% .$spatial_x_adjusted, y[2] %>% as.data.frame() %>% .$spatial_y_adjusted,xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[3] %>% as.data.frame() 
+a <- 45 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 - 40
+z$spatial_x_adjusted <- x2 - 20
+y[3] <- list(z)
+plot(y[3] %>% as.data.frame() %>% .$spatial_x_adjusted, y[3] %>% as.data.frame() %>% .$spatial_y_adjusted,xlim=c(-700,700),ylim=c(-700,700))
+
+z <- y[4] %>% as.data.frame() 
+a <- -70 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 
+z$spatial_x_adjusted <- x2 
+y[4] <- list(z)
+plot(y[4] %>% as.data.frame() %>% .$spatial_x_adjusted, y[4] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[5] %>% as.data.frame() 
+a <- -z$spatial_y_adjusted 
+b <- -z$spatial_x_adjusted  
+z$spatial_x_adjusted <- a
+z$spatial_y_adjusted <- b
+a <- -15 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 45
+z$spatial_x_adjusted <- x2 - 20
+y[5] <- list(z)
+plot(y[5] %>% as.data.frame() %>% .$spatial_x_adjusted, y[5] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[6] %>% as.data.frame() 
+z$spatial_y_adjusted <- -z$spatial_y_adjusted
+a <- 15 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 35
+z$spatial_x_adjusted <- x2 
+y[6] <- list(z)
+plot(y[6] %>% as.data.frame() %>% .$spatial_x_adjusted, y[6] %>% as.data.frame() %>% .$spatial_y_adjusted,xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[7] %>% as.data.frame() 
+z$spatial_y_adjusted <- -z$spatial_y_adjusted +50
+z$spatial_x_adjusted <- z$spatial_x_adjusted +50
+a <- 10 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 20
+z$spatial_x_adjusted <- x2 -50
+y[7] <- list(z)
+plot(y[7] %>% as.data.frame() %>% .$spatial_x_adjusted, y[7] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[8] %>% as.data.frame() 
+a <- z$spatial_y_adjusted 
+b <- z$spatial_x_adjusted  
+z$spatial_x_adjusted <- a
+z$spatial_y_adjusted <- b
+a <- -3 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2
+z$spatial_x_adjusted <- x2
+y[8] <- list(z)
+plot(y[8] %>% as.data.frame() %>% .$spatial_x_adjusted, y[8] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[9] %>% as.data.frame() 
+z$spatial_x_adjusted <- -z$spatial_x_adjusted
+a <- -3 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 20
+z$spatial_x_adjusted <- x2
+y[9] <- list(z)
+plot(y[9] %>% as.data.frame() %>% .$spatial_x_adjusted, y[9] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[10] %>% as.data.frame() 
+z$spatial_x_adjusted <- -z$spatial_x_adjusted
+z$spatial_y_adjusted <- z$spatial_y_adjusted + 10
+y[10] <- list(z)
+plot(y[10] %>% as.data.frame() %>% .$spatial_x_adjusted, y[10] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[11] %>% as.data.frame() 
+z$spatial_x_adjusted <- -z$spatial_x_adjusted
+a <- 15 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 -30
+z$spatial_x_adjusted <- x2 
+z_select <- z %>%
+  dplyr::filter(spatial_x_adjusted < -155 & spatial_y_adjusted < -200) 
+plot(z_select %>% as.data.frame() %>% .$spatial_x_adjusted, z_select %>% as.data.frame() %>% .$spatial_y_adjusted)
+a <- -50 * pi / 180
+y2 <- z_select$spatial_y_adjusted*cos(a) + z_select$spatial_x_adjusted*sin(a)
+x2 <- -z_select$spatial_y_adjusted*sin(a) + z_select$spatial_x_adjusted*cos(a)
+z_select$spatial_y_adjusted <- y2 -250
+z_select$spatial_x_adjusted <- x2 + 350
+z[rownames(z_select),c("spatial_x_adjusted","spatial_y_adjusted")] <- c(z_select$spatial_x_adjusted, z_select$spatial_y_adjusted)
+y[11] <- list(z)
+a <- 55 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 10
+z$spatial_x_adjusted <- x2 -20
+y[11] <- list(z)
+plot(y[11] %>% as.data.frame() %>% .$spatial_x_adjusted, y[11] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[12] %>% as.data.frame() 
+a <- z$spatial_x_adjusted
+b <- z$spatial_y_adjusted
+z$spatial_x_adjusted <- b
+z$spatial_y_adjusted <- a
+a <- 40 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 90
+z$spatial_x_adjusted <- x2 + 20
+z_select <- z %>%
+  dplyr::filter(spatial_x_adjusted > 220 & spatial_y_adjusted > 350)
+a <- -37 * pi / 180
+y2 <- z_select$spatial_y_adjusted*cos(a) + z_select$spatial_x_adjusted*sin(a)
+x2 <- -z_select$spatial_y_adjusted*sin(a) + z_select$spatial_x_adjusted*cos(a)
+z_select$spatial_y_adjusted <- y2 + 190
+z_select$spatial_x_adjusted <- x2 - 230
+z[rownames(z_select),c("spatial_x_adjusted","spatial_y_adjusted")] <- c(z_select$spatial_x_adjusted, z_select$spatial_y_adjusted)
+z_select <- z %>%
+  dplyr::filter( spatial_x_adjusted >0 & spatial_y_adjusted <0 | spatial_x_adjusted >500)
+a <- 0 * pi / 180
+y2 <- z_select$spatial_y_adjusted*cos(a) + z_select$spatial_x_adjusted*sin(a)
+x2 <- -z_select$spatial_y_adjusted*sin(a) + z_select$spatial_x_adjusted*cos(a)
+z_select$spatial_y_adjusted <- y2 -100
+z_select$spatial_x_adjusted <- x2 - 130
+z[rownames(z_select),c("spatial_x_adjusted","spatial_y_adjusted")] <- c(z_select$spatial_x_adjusted, z_select$spatial_y_adjusted)
+plot(z_select %>% as.data.frame() %>% .$spatial_x_adjusted, z_select %>% as.data.frame() %>% .$spatial_y_adjusted)
+a <- 20 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 -20
+z$spatial_x_adjusted <- x2 + 20
+y[12] <- list(z)
+plot(y[12] %>% as.data.frame() %>% .$spatial_x_adjusted, y[12] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[13] %>% as.data.frame() 
+z$spatial_x_adjusted <- z$spatial_x_adjusted 
+z$spatial_y_adjusted <- -z$spatial_y_adjusted + 110
+a <- -20 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 10
+z$spatial_x_adjusted <- x2 -30
+z_remove <- z %>%
+  dplyr::filter( spatial_x_adjusted > 410 & spatial_y_adjusted > 400)
+z <- z[!rownames(z) %in% rownames(z_remove),]
+y[13] <- list(z)
+plot(y[13] %>% as.data.frame() %>% .$spatial_x_adjusted, y[13] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[14] %>% as.data.frame() 
+z$spatial_y_adjusted <- -z$spatial_y_adjusted
+a <- -50 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 
+z$spatial_x_adjusted <- x2 + 10
+y[14] <- list(z) 
+plot(y[14] %>% as.data.frame() %>% .$spatial_x_adjusted, y[14] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[15] %>% as.data.frame() 
+z$spatial_x_adjusted <- -z$spatial_x_adjusted
+a <- -50 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 
+z$spatial_x_adjusted <- x2 + 25
+y[15] <- list(z)
+plot(y[15] %>% as.data.frame() %>% .$spatial_x_adjusted, y[15] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[16] %>% as.data.frame() 
+z$spatial_x_adjusted <- -z$spatial_x_adjusted
+a <- -30 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 25
+z$spatial_x_adjusted <- x2 - 20
+y[16] <- list(z)
+plot(y[16] %>% as.data.frame() %>% .$spatial_x_adjusted, y[16] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[17] %>% as.data.frame() 
+z$spatial_x_adjusted <- -z$spatial_x_adjusted
+z$spatial_y_adjusted <- -z$spatial_y_adjusted
+a <- 70 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- -y2 + 10
+z$spatial_x_adjusted <- x2 
+y[17] <- list(z)
+plot(y[17] %>% as.data.frame() %>% .$spatial_x_adjusted, y[17] %>% as.data.frame() %>% .$spatial_y_adjusted, xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[18] %>% as.data.frame() 
+z$spatial_x_adjusted <- -z$spatial_x_adjusted
+z$spatial_y_adjusted <- -z$spatial_y_adjusted
+a <- 70 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- -y2 
+z$spatial_x_adjusted <- x2 + 25
+y[18] <- list(z)
+plot(y[18] %>% as.data.frame() %>% .$spatial_x_adjusted, y[18] %>% as.data.frame() %>% .$spatial_y_adjusted,xlim=c(-700,700),ylim=c(-700,700))
+
+
+z <- y[19] %>% as.data.frame() 
+a <- -80 * pi / 180
+y2 <- z$spatial_y_adjusted*cos(a) + z$spatial_x_adjusted*sin(a)
+x2 <- -z$spatial_y_adjusted*sin(a) + z$spatial_x_adjusted*cos(a)
+z$spatial_y_adjusted <- y2 + 30
+z$spatial_x_adjusted <- x2 
+y[19] <- list(z)
+plot(y[19] %>% as.data.frame() %>% .$spatial_x_adjusted, y[19] %>% as.data.frame() %>% .$spatial_y_adjusted,xlim=c(-700,700),ylim=c(-700,700))
+
+
+### Check the alignment between the adjacent slices
+res <- do.call(rbind,y)
+res_89 <- res %>%
+  dplyr::filter(slice == 9 |  slice ==10)
+plot(res_89$spatial_x_adjusted,res_89$spatial_y_adjusted, col=res_89$slice)
+
+ggplot(res_89 %>% as.data.frame(),aes(x=spatial_x_adjusted, y=spatial_y_adjusted, color=colors)) +
+  geom_point(size=1) +
+  xlim(-600, 600) +
+  ylim(-600, 600) +
+  theme_classic() 
+
+
+ggplot(y[13] %>% as.data.frame(),aes(x=spatial_x_adjusted, y=spatial_y_adjusted, color=colors)) +
+  geom_point(size=0.5) +
+  xlim(-600, 600) +
+  ylim(-600, 600) +
+  theme_classic() +
+  theme(axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        legend.position="none") +
+
+  scale_color_manual(values = levels(as.factor((y[13] %>% as.data.frame())$colors))) +
+  coord_fixed(ratio = 1, xlim = NULL, ylim = NULL, expand = TRUE, clip = "on")
+```
+
+### save seurat object with adjusted coordinates
+```{r}
+zf10_st <- zf10_st[,!colnames(zf10_st) %in% rownames(z_remove)]
+res <- res[(rownames(zf10_st@meta.data)),]
+
+zf10_st_coord.df = data.frame(x=res$spatial_x_adjusted, y=res$spatial_y_adjusted, z=res$spatial_z_adjusted, stringsAsFactors=FALSE) # (stringsAsFactors only if also have a separate barcodes column)
+rownames(zf10_st_coord.df) = rownames(res)
+
+zf10_st@images$image =  new(
+    Class = 'SlideSeq',
+    assay = "Spatial",
+    key = "image_",
+    coordinates = zf10_st_coord.df
+  )
+
+zf10_st@meta.data$spatial_x_adjusted <- res$spatial_x_adjusted
+zf10_st@meta.data$spatial_y_adjusted <- res$spatial_y_adjusted
+zf10_st@meta.data$spatial_z_adjusted <- res$spatial_z_adjusted
+
+write_rds(zf10_st, here::here("output","zf10","zf10_st_seurat_filtered.rds"), compress = "gz")
+
+### Visualizing gene expression
+SpatialFeaturePlot(zf10_st, feature = c("rx3","aldh1a2","tbxta"), alpha =  c(0.1, 1))
+```
+
