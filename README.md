@@ -33,7 +33,8 @@ devtools::install_github('xuranw/MuSiC')
 ```
 
 ## Tutorial
-Here we provide a step-by-step tutorial
+Here we provide a step-by-step tutorial using _Drosophila_ ST data as an example. The data is available in the _test_ fold.
+* []()
 
 
 
