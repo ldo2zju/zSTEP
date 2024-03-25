@@ -5,7 +5,7 @@
 # Palette
 
 <p align="center">
-  <img width="1200"  src="https://github.com/ldo2zju/DreAM/blob/main/images/Palette%20pipeline.png">
+  <img width="1200"  src="https://github.com/ldo2zju/DreAM/blob/main/images/Palette%20workflow.png">
 </p>
 
 ## Requirements and Installation
