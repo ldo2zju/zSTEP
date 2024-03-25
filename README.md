@@ -5,7 +5,7 @@
 <p align="justify">The generation of <em>Dre</em>AM involves performing bulk RNA-seq on serial cryosections taken along the left-right axis, implementation of Palette to infer spatial gene expression using Stereo-seq data<sup>1</sup> as the reference and projection of the ST spots onto the zebrafish live images<sup>2</sup>.</p><br>
 
 <p align="center">
-  <img width="700"  src="https://github.com/ldo2zju/DreAM/blob/main/images/DreAM.png">
+  <img width="800"  src="https://github.com/ldo2zju/DreAM/blob/main/images/DreAM.png">
 </p>
 
 # Palette
@@ -23,7 +23,7 @@ Here we provide a step-by-step tutorial
 
 
 ## About
-<p align="justify">If you have any questions, please feel free to contact the following authors responsible for the Palette design, Dr. Yang Dong (yang.dongau@gmail.com), Dr. Tao Cheng (chengtao2ldo@zju.edu.cn) or Dr. Jie Liao (liaojie@zju.edu.cn).</p>
+If you have any questions, please feel free to contact the following authors responsible for the Palette design, Dr. Yang Dong (yang.dongau@gmail.com), Dr. Tao Cheng (chengtao2ldo@zju.edu.cn) or Dr. Jie Liao (liaojie@zju.edu.cn).
 
 ## Reference
 1. Liu, C. et al. Spatiotemporal mapping of gene expression landscapes and developmental trajectories during zebrafish embryogenesis. _Dev Cell_ 57, 1284-1298 e1285 (2022).
