@@ -2,8 +2,9 @@
 
 ### Yang Dong<sup>†</sup>,  Tao Cheng<sup>†</sup>, Xiang Liu<sup>†</sup>,  ..., Jie Liao*, Xiaohui Fan*, Pengfei Xu*
 
+<br><br>
 # Palette
-
+Palette is a bioinformatics pipeline designed to infer spatial gene expression from bulk RNA-seq data. Only spatial transcriptomics data is required as the reference, and bulk RNA-seq data is used as the input. The pipeline incorporates imputation, smoothing and expression amplification, resulting in accurate predictions of spatial expression patterns.<br><br>
 <p align="center">
   <img width="1200"  src="https://github.com/ldo2zju/DreAM/blob/main/images/Palette%20workflow.png">
 </p>
