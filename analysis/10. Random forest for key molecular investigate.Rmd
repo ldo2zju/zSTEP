@@ -1,0 +1,261 @@
+---
+title: "10. Random forest for key molecular investigate"
+author: "Tao, Yang"
+date: "2024-03-06"
+output: 
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options: 
+  chunk_output_type: console
+---
+### Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(Seurat)
+library(SeuratObject)
+library(randomForest)
+library(ggplot2)
+library(ggExtra)
+library(ggpmisc)
+library(ggpubr)
+library(data.table)
+library(forcats)
+library(RColorBrewer)
+```
+
+### Load data
+```{r}
+zf10_ligands <- readRDS(here::here("output","temp","zf10_ligands.rds")) %>% as.data.frame()
+zf10_TF <- readRDS(here::here("output","temp","zf10_TF.rds")) %>% as.data.frame()
+```
+
+```{r}
+input <- zf10_ligands
+
+input$AP_index <- input$rowname
+input_ <- input[2:length(colnames(input))]
+input_$AP_index <- as.numeric(input_$AP_index)
+```
+
+### 70% data to train random forest model, 30% data for test
+```{r}
+set.seed(120)
+train <- sample(nrow(input_), nrow(input_)*0.7)
+colnames(input_) <- gsub(":", "_", colnames(input_)) 
+colnames(input_) <- gsub("-", "_", colnames(input_)) 
+AP_train <- input_[train, ]
+AP_test <- input_[-train, ]
+
+set.seed(123)
+AP_train.forest <- randomForest(AP_index~., data = AP_train, importance = TRUE)
+```
+
+### Use training data to check the model accuracy
+```{r}
+train_test <- predict(AP_train.forest, AP_train)
+train_test_dataframe <- as.data.frame(train_test)
+train_test_dataframe$index <- rownames(train_test_dataframe)
+AP_train_dataframe <- AP_train %>% rownames_to_column("index")
+
+train_compare <- left_join(train_test_dataframe,AP_train_dataframe)
+
+g <- ggplot(train_compare, aes(AP_index, train_test)) + 
+  geom_point() + 
+  geom_smooth(method="lm", se=F) +
+  geom_abline(slope = 1,intercept = 0,lty="dashed") +
+  stat_poly_eq(
+    aes(label =paste( ..adj.rr.label.., sep = '~~')),
+    formula = y ~ x,  parse = TRUE,
+    family="serif",
+    size = 6.4,
+    color="black",
+    label.x = 0.1, 
+    label.y = 1)
+
+g1 <- ggMarginal(g, type = "histogram", fill="transparent")
+```
+
+### Use test data to check model performance
+```{r}
+predict_test <- predict(AP_train.forest, AP_test)
+predict_test_dataframe <- as.data.frame(predict_test)
+predict_test_dataframe$index <- rownames(predict_test_dataframe)
+AP_test_dataframe <- AP_test %>% rownames_to_column("index")
+test_compare <- left_join(AP_test_dataframe,predict_test_dataframe)
+
+g <- ggplot(test_compare, aes(AP_index, predict_test)) + 
+  geom_point() + 
+  geom_smooth(method="lm", se=F) +
+  geom_abline(slope = 1,intercept = 0,lty="dashed") +
+  stat_poly_eq(
+    aes(label =paste( ..adj.rr.label.., sep = '~~')),
+    formula = y ~ x,  parse = TRUE,
+    family="serif",
+    size = 6.4,
+    color="black",
+    label.x = 0.1, 
+    label.y = 1)
+
+g2 <- ggMarginal(g, type = "histogram", fill="transparent")
+ggarrange(g1, g2, ncol = 2)
+```
+
+### Access the factor importance to AP position
+```{r}
+importance_AP <- AP_train.forest$importance
+importance_plot <- tibble(var = rownames(importance_AP), 
+                          IncMSE = importance_AP[,1],
+                          IncNodePurity = importance_AP[,2])
+DT <- setDT(importance_plot)
+
+importance_plot$IncMSE <- importance_plot$IncMSE %>% as.numeric()
+
+
+p1 <- importance_plot %>% 
+  arrange(importance_plot$IncMSE) %>% 
+  mutate(var=factor(var, levels=var)) %>%
+  tail(10) %>%
+  ggplot(aes(x=var, y=IncMSE)) +
+  geom_segment( aes(x=var, xend=var, y=0, yend=IncMSE), color="skyblue") +
+  geom_point( color="blue", size=5, alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+p2 <- importance_plot %>% 
+  arrange(importance_plot$IncNodePurity) %>% 
+  mutate(var=factor(var, levels=var)) %>%
+  tail(10) %>%
+  ggplot(aes(x=var, y=IncNodePurity)) +
+  geom_segment( aes(x=var, xend=var, y=0, yend=IncNodePurity), color="skyblue") +
+  geom_point( color="blue", size=5, alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+ggarrange(p1, p2, ncol = 2)
+```
+
+### Cross validation to evaluate the number of variants
+```{r}
+set.seed(111)
+AP_train.cv <- replicate(5, rfcv(AP_train[-ncol(AP_train)], AP_train$AP_index, cv.fold = 5, step = 0.8), simplify = FALSE)
+
+AP_train.cv <- data.frame(sapply(AP_train.cv, '[[', 'error.cv'))
+AP_train.cv$vars <- rownames(AP_train.cv)
+AP_train.cv <- reshape2::melt(AP_train.cv, id = 'vars')
+AP_train.cv$vars <- as.numeric(as.character(AP_train.cv$vars))
+
+AP_train.cv.mean <- aggregate(AP_train.cv$value, by = list(AP_train.cv$vars), FUN = mean)
+AP_train.cv.mean
+
+ggplot(AP_train.cv.mean, aes(Group.1, x)) +
+  geom_point(size=2) +
+  geom_line(size=1,col="blue") +
+  labs(title = '',x = 'Number of vars', y = 'Cross-validation error') + 
+  xlim(0,30)
+```
+
+### Visualize the top 6 variant distribution on AP axis
+```{r}
+importance_AP <- importance_plot[order(importance_plot$IncNodePurity, decreasing = TRUE), ]
+
+importance_AP.select <- importance_AP[1:6, ]
+vars <- c(pull(importance_AP.select, var), 'AP_index')
+AP.select <- input_[,vars]
+AP.select <- reshape2::melt(AP.select, id = 'AP_index')
+
+ggplot(AP.select, aes(x = AP_index, y = value)) +
+  geom_point(size=1,col="gray") +
+  geom_smooth(size=2) +
+  facet_wrap(~variable, ncol = 2, scale = 'free_y') +
+  labs(title = '',x = 'AP_index', y = 'Relative abundance') +
+  theme_bw() + 
+  theme(legend.position = "none", panel.border = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+
+```
+
+### Use a slide window to sum the expression along AP axis
+```{r}
+s <- 0.1
+df <- matrix(NA, nrow = 16514, ncol = 0)
+
+for (i in seq(0,0.9,s)){
+  if (count(between(zf10_linearizeAP$normalized_AP,i,i+s)) > 0) {
+  subset <- zf10_linearizeAP[,between(zf10_linearizeAP$normalized_AP,i,i+s)]
+  sce <- SingleCellExperiment(assays = list(counts = subset@assays$RNA@counts), 
+                              colData = subset@meta.data)
+  groups <- colData(sce)[, c("orig.ident")]
+  bulk <- aggregate.Matrix(t(counts(sce)),groupings = groups, fun = "sum") %>%
+  t() %>%
+  as.data.frame()
+  colnames(bulk) <- i+s/2
+  df <- df %>% cbind(bulk)
+  }
+}
+
+df_norm <- df/do.call(pmax, df)
+```
+
+### Heatmap showing the distribution of morphogens and TFs along AP axis
+```{r}
+df_ligands <- df_norm[c("fgf3","aldh1a2","gdf3","fgf8a","wnt8b","bmp4","wnt5b","jag2b","bmp7a","wnt11"),] %>% t() %>% as.data.frame() %>% 
+  rownames_to_column("AP_position")
+  
+df_ligands <- df_norm[c("fgf3","jag2b","wnt8b","wnt11","aldh1a2","fgf8a","wnt5b","gdf3","bmp4","bmp7a"),] %>% t() %>% as.data.frame() %>% 
+  rownames_to_column("AP_position")
+
+pheatmap::pheatmap(
+  df_ligands[2:8,] %>% dplyr::select(-AP_position) %>% t(),
+  color = colorRampPalette(c("white","#925E9FFF"))(256),
+  labels_row = rownames(df_ligands %>% dplyr::select(-AP_position) %>% t()),
+  labels_col = df_ligands$AP_position,
+  border_color = "white", 
+  cluster_rows = F,
+  show_colnames = F,
+  cutree_cols = 3, 
+  cluster_cols = FALSE, number_color = "black",
+  cellwidth = 20, cellheight = 10,fontsize = 9,
+  #annotation_row = rownames(X),
+  main = "Heatmap zf10 key morphogens"
+  )
+
+
+df_TF <- df_norm[c("rx3","vox","six7","gsc","her6","hoxb7a","sox19a","cdx4","irx7","sox3"),] %>% t() %>% as.data.frame() %>% 
+  rownames_to_column("AP_position")
+
+df_TF <- df_norm[c("gsc","rx3","six7","her6","sox19a","sox3","irx7","hoxb7a","cdx4","vox"),] %>% t() %>% as.data.frame() %>% 
+  rownames_to_column("AP_position")
+
+heatmap <- pheatmap::pheatmap(
+  df_TF[2:8,] %>% dplyr::select(-AP_position) %>% t(),
+  color = colorRampPalette(c("white","#8bc34a"))(256),
+  labels_row = rownames(df_TF %>% dplyr::select(-AP_position) %>% t()),
+  labels_col = df_TF$AP_position,
+  border_color = "white", 
+  cluster_rows = F,
+  show_colnames = F,
+  cutree_cols = 3, 
+  cluster_cols = FALSE, number_color = "black",
+  cellwidth = 20, cellheight = 10,fontsize = 9,
+  #annotation_row = rownames(X),
+  main = "Heatmap zf10 key TFs",
+  clustering_callback = callback
+  )
+```
