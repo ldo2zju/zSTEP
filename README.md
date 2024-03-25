@@ -15,7 +15,22 @@
 </p>
 
 ## Requirements and Installation
+Palette is a R-programming pipeline, and employs BayesSpace<sup>3</sup> for spatial clustering and MuSiC<sup>4</sup> for deconvolution. The following codes show the installation of these two R packages.
 
+```{r, eval = FALSE}
+# install BiocManager if necessary
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager", repos = "https://cran.R-project.org")
+
+# install BayesSpace
+BiocManager::install("BayesSpace")
+
+# install devtools if necessary
+install.packages('devtools')
+
+# install MuSiC
+devtools::install_github('xuranw/MuSiC')
+```
 
 ## Tutorial
 Here we provide a step-by-step tutorial
@@ -28,6 +43,9 @@ If you have any questions, please feel free to contact the following authors res
 ## Reference
 1. Liu, C. et al. Spatiotemporal mapping of gene expression landscapes and developmental trajectories during zebrafish embryogenesis. _Dev Cell_ 57, 1284-1298 e1285 (2022).
 2. Shah, G. et al. Multi-scale imaging and analysis identify pan-embryo cell dynamics of germlayer formation in zebrafish. _Nat Commun_ 10, 5753 (2019).
+3. Wang, X., Park, J., Susztak, K., Zhang, N.R. & Li, M. Bulk tissue cell type deconvolution with multi-subject single-cell expression reference. _Nat Commun_ 10, 380 (2019).
+4. Zhao, E. et al. Spatial transcriptomics at subspot resolution with BayesSpace. _Nature Biotechnology_ 39, 1375-+ (2021).
+
 
 
 
