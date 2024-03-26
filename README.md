@@ -33,8 +33,8 @@ devtools::install_github('xuranw/MuSiC')
 ```
 
 ## Tutorial
-Here we provide a step-by-step tutorial using _Drosophila_ ST data as an example. The data is available in the _test_ fold.
-* []()
+Here we provide a step-by-step tutorial using _Drosophila_ ST data<sup>5</sup> as an example. The data is available in the _test_ fold.
+* [Inferring spatial gene expression patterns from _Drosophila_ pseudo bulk data]()
 
 
 
@@ -46,7 +46,7 @@ If you have any questions, please feel free to contact the following authors res
 2. Shah, G. et al. Multi-scale imaging and analysis identify pan-embryo cell dynamics of germlayer formation in zebrafish. _Nat Commun_ 10, 5753 (2019).
 3. Wang, X., Park, J., Susztak, K., Zhang, N.R. & Li, M. Bulk tissue cell type deconvolution with multi-subject single-cell expression reference. _Nat Commun_ 10, 380 (2019).
 4. Zhao, E. et al. Spatial transcriptomics at subspot resolution with BayesSpace. _Nature Biotechnology_ 39, 1375-+ (2021).
-
+5. Wang, M. et al. High-resolution 3D spatiotemporal transcriptomic maps of developing Drosophila embryos and larvae. _Dev Cell_ 57, 1271-1283 e1274 (2022).
 
 
 
