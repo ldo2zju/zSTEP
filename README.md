@@ -44,8 +44,8 @@ If you have any questions, please feel free to contact the following authors res
 ## Reference
 1. Liu, C. et al. Spatiotemporal mapping of gene expression landscapes and developmental trajectories during zebrafish embryogenesis. _Dev Cell_ 57, 1284-1298 e1285 (2022).
 2. Shah, G. et al. Multi-scale imaging and analysis identify pan-embryo cell dynamics of germlayer formation in zebrafish. _Nat Commun_ 10, 5753 (2019).
-3. Wang, X., Park, J., Susztak, K., Zhang, N.R. & Li, M. Bulk tissue cell type deconvolution with multi-subject single-cell expression reference. _Nat Commun_ 10, 380 (2019).
-4. Zhao, E. et al. Spatial transcriptomics at subspot resolution with BayesSpace. _Nature Biotechnology_ 39, 1375-+ (2021).
+3. Zhao, E. et al. Spatial transcriptomics at subspot resolution with BayesSpace. _Nature Biotechnology_ 39, 1375-+ (2021).
+4. Wang, X., Park, J., Susztak, K., Zhang, N.R. & Li, M. Bulk tissue cell type deconvolution with multi-subject single-cell expression reference. _Nat Commun_ 10, 380 (2019).
 5. Wang, M. et al. High-resolution 3D spatiotemporal transcriptomic maps of developing Drosophila embryos and larvae. _Dev Cell_ 57, 1271-1283 e1274 (2022).
 
 
