@@ -1604,12 +1604,14 @@ if (interactive()) setwd(here::here(&quot;analysis&quot;))</code></pre>
 </div>
 <div id="summary" class="section level3">
 <h3>Summary</h3>
-<p>Here we take 2 neighboring ST slices (slice 4 and slice 5) from
+<p align="justify">
+Here we take 2 neighboring ST slices (slice 4 and slice 5) from
 <em>Drosophila</em> ST data. Slice 4 will be used as the ST reference,
 while slice 5 will be converted a pseudo bulk data. Palette will then be
 implemented to infer the expression patterns from the pseudo bulk data
 using the slice 4 as the ST reference. The inferred expression patterns
-will then be compared with the real expression of slice 5 ST data.</p>
+will then be compared with the real expression of slice 5 ST data.
+</p>
 </div>
 <div id="load-data" class="section level3">
 <h3>Load data</h3>
@@ -1672,9 +1674,11 @@ The adjacent <em>Drosophila</em> ST slices.
 </div>
 <div id="construct-pseudo-bulk-data-and-select-highly-expressed-genes" class="section level3">
 <h3>Construct pseudo bulk data and select highly expressed genes</h3>
-<p>Aggregate expression of ST data to generate pseudo bulk. Slice 5 is
+<p align="justify">
+Aggregate expression of ST data to generate pseudo bulk. Slice 5 is
 convert to pseudo bulk, while the aggregated expression of ST data
-(slice 4) is used for selecting highly expressed genes.</p>
+(slice 4) is used for selecting highly expressed genes.
+</p>
 <pre class="r"><code># Convert both to pseudo bulk data
 slice_sce &lt;- SingleCellExperiment(assays = list(counts = Drosophila_slice@assays$RNA@counts), 
                            colData = Drosophila_slice@meta.data)
@@ -1702,10 +1706,12 @@ slice_5_bulk_reorder &lt;- slice_5_bulk[match(rownames(slice_4_ST_sum_high_exp),
 gene_filter &lt;- (slice_5_bulk_reorder/slice_4_ST_sum_high_exp) %&gt;%
   set_colnames(&quot;ratio&quot;) %&gt;%
   .[is.finite(rowSums(.)),, drop = FALSE]</code></pre>
-<p>We use density plot to visualize the expression ratios of the pseudo
+<p align="justify">
+We use density plot to visualize the expression ratios of the pseudo
 bulk (slice 5) and the aggregated ST (slice 4). We take the top 2000
 genes closest to the mean and median ratios for the following analyses.
-These genes are highly expressed in both pseudo bulk and ST data.</p>
+These genes are highly expressed in both pseudo bulk and ST data.
+</p>
 <pre class="r"><code>ggplot(gene_filter, aes(x=ratio)) + 
   geom_density() + theme_classic() +
   theme(text = element_text(size = 20)) </code></pre>
@@ -1729,10 +1735,11 @@ high_exp_genes &lt;- gene_filter %&gt;%
 </div>
 <div id="spatial-clustering-of-st-data" class="section level3">
 <h3>Spatial clustering of ST data</h3>
-<p>BayesSpace is employed for spatial clustering on ST data (slice 4).
-Only the selected 2000 highly expressed genes are used for spatial
-clustering. The cluster identities are then assigned to each ST
-spot.</p>
+<p align="justify">
+BayesSpace is employed for spatial clustering on ST data (slice 4). Only
+the selected 2000 highly expressed genes are used for spatial
+clustering. The cluster identities are then assigned to each ST spot.
+</p>
 <pre class="r"><code># Convert coordinates into pixel coordinates for BayesSpace
 metadata &lt;-  slice_4@meta.data
 metadata$col &lt;-  metadata$new_x %&gt;% as.numeric() %&gt;% as.integer()
@@ -1806,9 +1813,11 @@ knitr::kable(prop_table,
 </div>
 <div id="pseudo-bulk-deconvolution" class="section level3">
 <h3>Pseudo bulk deconvolution</h3>
-<p>MuSiC is employed for deconvolution. Also, only the selected 2000
-highly expressed genes are used for deconvolution. We can then achieve
-the abundances of each cluster in pseudo bulk data.</p>
+<p align="justify">
+MuSiC is employed for deconvolution. Also, only the selected 2000 highly
+expressed genes are used for deconvolution. We can then achieve the
+abundances of each cluster in pseudo bulk data.
+</p>
 <pre class="r"><code># Pre-process data for MuSiC
 bulk.est &lt;- Biobase::ExpressionSet(assayData = slice_bulk %&gt;% as.matrix())
 sc.eset &lt;- ExpressionSet(assayData = as.matrix(GetAssayData(slice_4[rownames(high_exp_genes),])), phenoData = new(&quot;AnnotatedDataFrame&quot;, slice_4@meta.data))
@@ -1858,10 +1867,12 @@ knitr::kable(prop_table_2,
 </div>
 <div id="variable-factor-calculation" class="section level3">
 <h3>Variable factor calculation</h3>
-<p>Here we define a variable factor to adjust the expression difference
+<p align="justify">
+Here we define a variable factor to adjust the expression difference
 between pseudo bulk and ST data. The variable factor is defined as the
 ratio of bulk expression matrix to the pseudo bulk matrix. Each gene has
-its own variable factor to adjust its expression.</p>
+its own variable factor to adjust its expression.
+</p>
 <pre class="r"><code># The average gene expression of each cluster
 cluster.averages &lt;- AverageExpression(slice_4) %&gt;%
   as.data.frame() %&gt;%
@@ -1902,9 +1913,11 @@ rownames(variable_factor_matrix) &lt;- rownames(variable_factor)</code></pre>
 ## 14-3-3zeta          355.6674
 ## 140up               386.9003
 ## 18SrRNA-Psi:CR41602 344.8970</code></pre>
-<p>The adjusted matrix is the overall gene expression of each cluster,
+<p align="justify">
+The adjusted matrix is the overall gene expression of each cluster,
 which is obtained by taking the dot product of the cluster expression
-matrix of ST slice and the variable factor.</p>
+matrix of ST slice and the variable factor.
+</p>
 <pre class="r"><code>adjusted_matrix &lt;- ((cluster.averages_filtered[rownames(variable_factor_matrix),] * variable_factor_matrix)) 
 colnames(adjusted_matrix) &lt;- c(&quot;cluster 1&quot;,&quot;cluster 2&quot;,&quot;cluster 3&quot;,&quot;cluster 4&quot;,&quot;cluster 5&quot;)</code></pre>
 <pre><code>## [1] &quot;The top 5 rows of adjusted matrix&quot;</code></pre>
@@ -1920,19 +1933,25 @@ colnames(adjusted_matrix) &lt;- c(&quot;cluster 1&quot;,&quot;cluster 2&quot;,&q
 </div>
 <div id="estimate-expression-of-each-spot" class="section level3">
 <h3>Estimate expression of each spot</h3>
-<p>The expression of each spot is estimated through a loop algorithm. In
+<p align="justify">
+The expression of each spot is estimated through a loop algorithm. In
 each interaction of the loop, the procedure begins by selecting one
 random spot and its neighboring spots. The number of neighboring spots
 can be changed depending on the data. The expression of spots belonging
 to the same cluster is aggregated to form a pseudo bulk data called
-regional cluster ST (RST). Here we assume that the ratio of RST to the
-entire ST data is equal to the ratio of the adjusted RST to the adjusted
-matrix. We define the ratio of RST to the entire ST as regional factor
-K. The adjust regional ST equals to the dot product of adjusted matrix
-and regional factor K. The expression of adjusted RST is then evenly
-allocated into the selected spots of this cluster. After thousands of
-interactions, the average expression of each spot is almost stable and
-considered as the output estimated expression.</p>
+regional cluster ST (RST).
+<p>
+ 
+</p>
+Here we assume that the ratio of RST to the entire ST data is equal to
+the ratio of the adjusted RST to the adjusted matrix. We define the
+ratio of RST to the entire ST as regional factor K. The adjust regional
+ST equals to the dot product of adjusted matrix and regional factor K.
+The expression of adjusted RST is then evenly allocated into the
+selected spots of this cluster. After thousands of interactions, the
+average expression of each spot is almost stable and considered as the
+output estimated expression.
+</p>
 <pre class="r"><code>ST &lt;- slice_4_ST_sum %&gt;%
     as.data.frame() %&gt;%
     rownames_to_column() %&gt;%
@@ -2016,14 +2035,16 @@ saveRDS(slice_4_adjusted, here::here(&quot;test&quot;,&quot;slice_4_adjusted.rds
 </div>
 <div id="palette-performance-assessment" class="section level3">
 <h3>Palette performance assessment</h3>
-<p>We assess the Palette performance through comparing the expression
+<p align="justify">
+We assess the Palette performance through comparing the expression
 patterns of Palette implemented data to original ST data and <em>in
 situ</em> hybridization images. Here we show the expression patterns of
 marker genes CG5171 (amnioserosa) and Idgf6 (hemolymph). Compared the
 original ST data (Left), the Palette-implemented data (Right)
 significantly increases the signal-to-noise ratio and exhibits more
 specific expression patterns, which are more similar to the bona fide
-patterns observed by <em>in situ</em> hybridization.</p>
+patterns observed by <em>in situ</em> hybridization.
+</p>
 <pre class="r"><code># Construct sce object for expression visualization 
 metadata &lt;-  slice_4_adjusted@meta.data
 metadata$col &lt;-  slice_4_adjusted@meta.data$col
