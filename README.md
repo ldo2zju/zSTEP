@@ -11,7 +11,7 @@
 # Palette
 <p align="justify">Palette is a bioinformatics pipeline designed to infer spatial gene expression from bulk RNA-seq data. Only spatial transcriptomics data is required as the reference, and bulk RNA-seq data is used as the input. The pipeline incorporates imputation, smoothing and expression amplification, resulting in accurate predictions of spatial expression patterns.</p><br>
 <p align="center">
-  <img width="1200"  src="https://github.com/ldo2zju/DreAM/blob/main/images/Palette%20workflow.png">
+  <img width="1200"  src="https://github.com/ldo2zju/DreSTEP/blob/main/images/Palette_workflow.png">
 </p>
 
 ## Requirements and Installation
