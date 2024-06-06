@@ -1,8 +1,8 @@
-# _Danio rerio_ Asymmetrical Maps (<em>Dre</em>AM)
+# _Danio rerio_ SpatioTemperal Expression Profiles (<em>Dre</em>STEP)
 
 ### Yang Dong<sup>†</sup>,  Tao Cheng<sup>†</sup>, Xiang Liu<sup>†</sup>,  ..., Jie Liao*, Xiaohui Fan*, Pengfei Xu*
-<p align="justify"><em>Dre</em>AM is a zebrafish spatial gene expression atlas that provides a powerful platform for visualizing gene expression patterns in real zebrafish embryonic cartography and investigating spatial cell-cell interactions within selected regions. As a result, <em>Dre</em>AM holds significant potential for investigating a wide range of developmental events during development. </p>
-<p align="justify">The generation of <em>Dre</em>AM involves performing bulk RNA-seq on serial cryosections taken along the left-right axis, implementation of Palette to infer spatial gene expression using Stereo-seq data<sup>1</sup> as the reference and projection of the ST spots onto the zebrafish live images<sup>2</sup>.</p><br>
+<p align="justify"><em>Dre</em>STEP is a zebrafish spatial gene expression atlas that provides a powerful platform for visualizing gene expression patterns in real zebrafish embryonic cartography and investigating spatial cell-cell interactions within selected regions. As a result, <em>Dre</em>STEP holds significant potential for investigating a wide range of developmental events during development. </p>
+<p align="justify">The generation of <em>Dre</em>STEP involves performing bulk RNA-seq on serial cryosections taken along the left-right axis, implementation of Palette to infer spatial gene expression using Stereo-seq data<sup>1</sup> as the reference and projection of the ST spots onto the zebrafish live images<sup>2</sup>.</p><br>
 
 <p align="center">
   <img width="800"  src="https://github.com/ldo2zju/DreAM/blob/main/images/DreAM.png">
