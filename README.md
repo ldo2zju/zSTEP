@@ -34,7 +34,7 @@ devtools::install_github('xuranw/MuSiC')
 
 ## Tutorial
 Here we provide a step-by-step tutorial using _Drosophila_ ST data<sup>5</sup> as an example. The data is available in the _test_ fold.
-* [Inferring spatial gene expression patterns from _Drosophila_ pseudo bulk data](https://rawcdn.githack.com/ldo2zju/zSTEP/b875cfffa45d40c62fc3f367839981bc492c97b8/analysis/Palette-Drosophila_tutorial.html)
+* [Inferring spatial gene expression patterns from _Drosophila_ pseudo bulk data](https://rawcdn.githack.com/ldo2zju/zSTEP/acbacd05000a9f6834e0cfabeadebccc7e214139/analysis/Palette_Drosophila_tutorial.html)
 
 
 
