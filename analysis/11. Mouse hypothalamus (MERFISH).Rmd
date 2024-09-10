@@ -1,0 +1,410 @@
+---
+title: 'Inferring spatial gene expression patterns using the MERFISH ST reference (Mouse hypothalamic preoptic region)'
+author: "Yang"
+date: "2024-09-04"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options:
+  chunk_output_type: console
+---
+<style type="text/css">
+  body{
+  font-size: 12pt;
+}
+</style>
+
+### Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r packages}
+library(limma)
+library(Seurat)
+library(readr)
+library(tidyverse)
+library(magrittr)
+library(pander)
+library(SingleCellExperiment)
+library(reshape2)
+library(BayesSpace)
+library(MuSiC)
+library(ggplot2)
+library(ggpubr)
+library(Matrix.utils)
+
+theme_set(theme_bw())
+panderOptions("big.mark", ",")
+panderOptions("table.split.table", Inf)
+panderOptions("table.style", "rmarkdown")
+if (interactive()) setwd(here::here("analysis"))
+```
+
+### Summary
+<p align="justify">To demonstrate a broad application of Palette, we plan to use MERFISH data as the ST reference and  evaluate the performance of Palette. Here we present a tutorial using MERFISH data as the ST reference to infer the spatial gene expression in the mouse hypothalamus region. The inferred expression patterns will then be compared to the original expression of the MERFISH ST data.
+
+Note: Palette only takes the overlapped genes for inference, and thus only the genes present in the MERFISH reference can be inferred. 
+</p>
+
+### Load data
+Load the hypothalamus bulk data (Liao et al., 2022) and the MERFISH ST reference (Moffitt et al., 2018).
+```{r load data}
+bulk <- read.delim(here::here("test","mouse_hypothalamus_bulk.txt"), header = T) %>% column_to_rownames(var = "GENE")
+MERFISH_st <- readRDS(here::here("test","mouse_hypothalamus_MERFISH.rds"))
+```
+
+### MERFISH ST slices 
+Here we visualize the MERFISH slice and each ST spot is colored with spot annotation.
+```{r MERFISH ST slices, out.width="60%", fig.align = 'center',fig.cap = "The MERFISH slice."}
+ggplot(MERFISH_st@meta.data %>% as.data.frame(),aes(x=Centroid_X, y=Centroid_Y, color=Cell_class)) +
+  geom_point(size=0.7) +
+  theme_classic() +
+    coord_fixed(ratio = 1, xlim = NULL, ylim = NULL, expand = TRUE, clip = "on") +
+  scale_color_manual(values = levels(MERFISH_st@meta.data$color %>% as.factor())) +
+  theme_classic() +
+  theme(axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank()) +
+  scale_color_manual(name="Cell type",values = c("pink", "brown", "#FFF799", "#6e9BC5", "#2ED9FF","red" ,"#ff66ff","#AEF359", "purple","grey")) +
+  guides(colour = guide_legend(override.aes = list(size=2.5)))
+```
+<p>&nbsp;</p>
+### Select the overlapped genes and take the stable genes for spatial clustering and deconvolution.
+<p align="justify">We take the overlapped genes in the bulk dataset and MERFISH ST reference, and then select stable genes for spatial clustering and deconvolution. Since only only a few hundred genes are present in MERFISH dataset, we choose the top 50 genes closest to the mean and median ratios as stable genes for the subsequent analyses. Given the high expression levels detected by MERFISH, we do not apply any filtering to the expression data in the analyses. 
+</p>
+```{r, out.width="40%", fig.align = 'center',fig.cap = "Density plot showing the expression ratio of bulk and MERFISH ST reference"}
+MERFISH_st <- MERFISH_st[rownames(bulk),]
+
+slice_sum <- colSums(t(MERFISH_st@assays$RNA@counts)) %>% as.data.frame() %>%
+  set_colnames("expression")
+
+bulk_reorder <- bulk[rownames(MERFISH_st),,drop=F]
+
+# Define the ratio of the bulk and the aggregate ST as gene filter
+gene_filter <- bulk_reorder/slice_sum %>%
+  .[is.finite(rowSums(.)),, drop = FALSE]
+colnames(gene_filter) <- "ratio"
+
+ggplot(gene_filter, aes(x=ratio)) + 
+  geom_density() + theme_classic() +
+  theme(text = element_text(size = 20)) 
+# The difference of gene ratio to the mean and median ratio
+gene_filter$differ <- abs(gene_filter$ratio - (mean(gene_filter$ratio)+median(gene_filter$ratio))/2)
+# Select the top 50 genes closer to the mean and median for spatial clustering and deconvolution
+stable_genes <- gene_filter %>%
+  .[order(.$differ),] %>%
+   top_n(.,-50)
+```
+
+### Spatial clustering of ST data
+<p align="justify">BayesSpace is employed for spatial clustering on MERFISH ST data. Only the selected 50 stable genes are used for spatial clustering. The cluster identities are then assigned to each ST spot.
+</p>
+```{r spatial clustering, out.width="80%", fig.align = 'center', fig.cap = "Spatial Clustering of MERFISH ST reference"}
+# Convert coordinates into pixel coordinates for BayesSpace
+metadata <-  MERFISH_st@meta.data
+metadata$col <-  (metadata$Centroid_X/30 %>% as.numeric()) %>% as.integer()
+metadata$row <-  (metadata$Centroid_Y/30 %>% as.numeric()) %>% as.integer()
+
+# Construct sce object
+sce <- SingleCellExperiment(assays = list(counts = MERFISH_st@assays$RNA@counts, logcounts = MERFISH_st@assays$RNA@data),
+                            colData=metadata)
+
+# Only take stable genes for spatial clustering
+sce_filtered <- sce[rownames(stable_genes),]
+sce_filtered <- spatialPreprocess(sce_filtered, platform="ST",
+                              n.PCs=4,n.HVGs = 2000, log.normalize=TRUE)
+# Select the number of clusters
+p <- qTune(sce_filtered, qs=seq(2, 10), platform="ST")
+
+# Clustering with BayesSpace
+set.seed(149)
+spatial_cluster <- spatialCluster(p, q=5, platform="ST", d=7,
+                           init.method="kmeans", model="t", gamma=2,
+                           nrep=10000, burn.in=100,
+                           save.chain=TRUE)
+
+# Visualizing spatial clusters
+clusterPlot(spatial_cluster, color="black") +
+  theme_bw() +
+  xlab("") +
+  ylab("") +
+  theme(text = element_text(size = 20))
+
+MERFISH_st$spatial_cluster <- spatial_cluster$spatial.cluster
+Idents(MERFISH_st) <- MERFISH_st$spatial_cluster
+
+# Check the proportions of each cluster
+prop_table <- prop.table(table(MERFISH_st$spatial_cluster)) %>% t()
+colnames(prop_table) <- c("cluster 1","cluster 2","cluster 3","cluster 4","cluster 5")
+rownames(prop_table) <- "Proportion"
+knitr::kable(prop_table,
+             caption = "The proportions of each cluster.")
+```
+<p>&nbsp;</p>
+### bulk deconvolution to estimate cell type abundances
+<p align="justify">MuSiC is employed for deconvolution. Also, only the selected 50 stable genes are used for deconvolution. We can then achieve the abundances of each cluster in pseudo bulk data.
+</p>
+```{r Use MuSiC for deconvolution}
+# Pre-process data for MuSiC
+bulk$rep <- bulk$CTGTGTGGACATTTGGAC
+bulk.est <- Biobase::ExpressionSet(assayData = bulk %>% as.matrix())
+sc.eset <- ExpressionSet(assayData = as.matrix(GetAssayData(MERFISH_st)), phenoData = new("AnnotatedDataFrame", MERFISH_st@meta.data))
+
+MERFISH_st$sample_id <- colnames(MERFISH_st)
+sce <- SingleCellExperiment(assays = list(counts = MERFISH_st[rownames(stable_genes),]@assays$RNA@counts, logcounts = MERFISH_st[rownames(stable_genes),]@assays$RNA@data),
+                            colData=MERFISH_st[rownames(stable_genes),]@meta.data)
+
+# MuSiC deconvolution
+Est.pro = music_prop(bulk.mtx = exprs(bulk.est), sc.sce = sce,  clusters = "spatial_cluster", samples = "sample_id")
+proportion <- Est.pro$Est.prop.weighted
+proportion_reorder <- proportion[, c("1","2","3","4","5")]
+
+# The estimated proportion of each cluster in pseudo bulk data
+prop_table_2 <- proportion_reorder[2,] %>% t()
+colnames(prop_table_2) <- c("cluster 1","cluster 2","cluster 3","cluster 4","cluster 5")
+rownames(prop_table_2) <- "Proportion"
+knitr::kable(prop_table_2,
+             caption = "The estimated proportions of each cluster in bulk data.")
+```
+<p>&nbsp;</p>
+### Variable factor calculation
+<p align="justify">Here we define a variable factor to adjust the expression difference between bulk and MERFISH ST reference. The variable factor is defined as the ratio of bulk expression matrix to the pseudo bulk matrix, which is constructed by the cluster expression of MERFISH data and cluster abundance of bulk. Each gene has its own variable factor to adjust its expression.
+</p>
+```{r Variable factor calculation}
+# The average gene expression of each cluster
+cluster.averages <- AverageExpression(MERFISH_st) %>%
+  as.data.frame() %>%
+  as.matrix()
+
+cluster.averages_filtered <- cluster.averages %>%
+  as.data.frame() %>%
+  rownames_to_column() %>%
+  dplyr::filter(.$rowname %in% rownames(bulk)) %>%
+  column_to_rownames(var= "rowname")  %>%
+  as.matrix() %>%
+  .[,c("RNA.1","RNA.2","RNA.3","RNA.4","RNA.5")]
+
+# The abundance of each cluster in pseudo bulk 
+abundance <- proportion_reorder %>%
+  .[2,,drop=FALSE] %>%
+  as.data.frame() %>%
+  as.matrix()
+
+
+bulk_reorder <- bulk[match(rownames(cluster.averages_filtered), rownames(bulk)),1,drop=FALSE] %>%
+  as.data.frame()
+
+# Define variable factor
+variable_factor <- (bulk_reorder/(cluster.averages_filtered %*% (abundance %>% t()))) %>%
+  .[is.finite(rowSums(.)),, drop = FALSE] %>%
+  as.data.frame() %>%
+  set_colnames("var")
+
+variable_factor_matrix <- rep(variable_factor,5) %>%
+  as.data.frame() %>%
+  set_colnames(c("1","2","3","4","5"))
+rownames(variable_factor_matrix) <- rownames(variable_factor)
+```
+
+```{r print variable factor, echo=FALSE}
+print("The top 5 rows of variable factor")
+head(variable_factor,5)
+# Use variable factor to adjust the average gene expression of each cluster and achieve the adjusted overall gene expression of each cluster called adjusted_matrix
+```
+<p align="justify">The adjusted matrix is the overall gene expression of each cluster, which is obtained by taking the dot product of the cluster expression matrix of ST slice and the variable factor. 
+</p>
+```{r adjusted matrix}
+adjusted_matrix <- ((cluster.averages_filtered[rownames(variable_factor_matrix),] * variable_factor_matrix)) 
+colnames(adjusted_matrix) <- c("cluster 1","cluster 2","cluster 3","cluster 4","cluster 5")
+```
+
+```{r print adjusted matrix, echo=FALSE}
+print("The top 5 rows of adjusted matrix")
+head(adjusted_matrix,5)
+```
+
+<p>&nbsp;</p>
+### Estimate expression of each spot
+<p align="justify">
+The expression of each spot is estimated through a loop algorithm. In each interaction of the loop, the procedure begins by selecting one random spot and its neighboring spots. The number of neighboring spots can be changed depending on the data. The expression of spots belonging to the same cluster is aggregated to form a pseudo bulk data called regional cluster ST (RST).
+<p>&nbsp;</p>
+Here we assume that the ratio of RST to the entire ST data is equal to the ratio of the adjusted RST to the adjusted matrix. We define the ratio of RST to the entire ST as regional factor K. The adjust regional ST equals to the dot product of adjusted matrix and regional factor K. The expression of adjusted RST is then evenly allocated into the selected spots of this cluster.
+After thousands of interactions, the average expression of each spot is almost stable and considered as the output estimated expression.
+</p>
+```{r expression allocation}
+#### Construct the MERFISH data to a pseudo bulk
+slice_sce <- SingleCellExperiment(assays = list(counts = MERFISH_st@assays$RNA@counts), 
+                           colData = MERFISH_st@meta.data)
+groups <- colData(slice_sce)[, c("Animal_ID")]
+slice_bulk <- aggregate.Matrix(t(counts(slice_sce)), 
+                       groupings = groups, fun = "sum") %>% 
+  as.data.frame() %>% t()
+
+
+ST <- slice_bulk %>%
+  as.data.frame() %>%
+  set_colnames("Counts") %>%
+  rownames_to_column() %>%
+  dplyr::select(Gene=rowname, Counts)
+
+#### Nearest 24 spots
+#### Due to the thousands of ST spots, we take 25 spots as a region.
+output_final <- data.frame(matrix(ncol = 0, nrow = length(rownames(variable_factor_matrix))))
+rownames(output_final) <- rownames(variable_factor_matrix)
+for (i in 1:5000) {
+  # Select one random spot
+  set.seed(i)
+  random.obj <- MERFISH_st[, sample(colnames(MERFISH_st), size = 1, replace=F)]
+  spot <- random.obj@meta.data[,c("Centroid_X","Centroid_Y")] %>% as.data.frame()
+  df <- MERFISH_st@meta.data[,c("Centroid_X","Centroid_Y")] %>% as.data.frame()
+  # Calculate the distance from other spots to the selected spot
+  df$distance = sqrt((df$Centroid_X - spot$Centroid_X)^2 + (df$Centroid_Y - spot$Centroid_Y)^2)
+  # Here we select the nearest 8 spots. The number of the nearest spots can be changed here. 
+  df <- df[order(df$distance),][1:25,]
+  random.neighbor <-  MERFISH_st[,rownames(df)]
+  output_region <- data.frame(matrix(ncol = 0, nrow = length(rownames(variable_factor_matrix))))
+  rownames(output_region) <- rownames(variable_factor_matrix)
+  # For each cluster in the selecting spots
+  for (k in as.numeric(levels(as.factor(random.neighbor$spatial_cluster)))){
+    # Select the spots belonging to the same cluster
+    cluster <- subset(random.neighbor, subset = spatial_cluster == k)
+    # Sum the expression of these spots from the same cluster
+    RST <- colSums(t((cluster@assays$RNA@counts))) %>%
+      as.data.frame() %>%
+      rownames_to_column() %>%
+      dplyr::select(Gene=rowname, Counts = '.')
+    # Define a regional factor K as the ratio of RST to ST
+    K <- RST$Counts/ST$Counts %>%
+      as.data.frame()
+    rownames(K) <- ST$Gene
+    K_filtered <- K %>%
+      rownames_to_column() %>%
+      dplyr::select(Gene=rowname, factor = '.') %>%
+      dplyr::filter(.$Gene %in% rownames(variable_factor_matrix)) %>%
+      column_to_rownames(var= "Gene")  %>%
+      as.matrix()
+    # Adjusted regional bulk equals to the dot product of adjusted matrix and regional factor K
+    region_bulk <- (adjusted_matrix[,k] %>% as.data.frame()) * K_filtered
+    # Assign expression to each spot
+    each_spot <- data.frame(region_bulk/length(cluster$orig.ident))
+    output <- cbind(each_spot, rep(each_spot[1],  length(cluster$orig.ident)))
+    output <- output[1:(length(output)-1)]
+    colnames(output) <- rownames(cluster@meta.data)
+    output_region <- output_region %>%
+      cbind(output)
+    }
+  output_final <- output_final %>%
+    cbind(output_region)
+}
+
+# Calculate the average expression of each spot
+cell_list <- as.list(rownames(MERFISH_st@meta.data))
+
+spot_average_counts_final <- data.frame(matrix(ncol = 0, nrow = length(rownames(variable_factor_matrix))))
+rownames(spot_average_counts_final) <- rownames(variable_factor_matrix)
+spot_rep_times <- data.frame()
+
+for ( i in 1:length(cell_list)) {
+  spot <- colnames(output_final) == cell_list[i]
+  spot_counts <- output_final[, spot, drop = FALSE]
+  spot_rep_times <- spot_rep_times %>%
+    rbind(length(colnames(spot_counts)))
+  spot_average_counts <-  data.frame(rowSums(spot_counts))/length(spot_counts)
+  colnames(spot_average_counts) <- cell_list[i]
+  spot_average_counts_final <- spot_average_counts_final %>%
+    cbind(spot_average_counts)
+}
+
+# Covert Palette-inferred data into seurat object
+MERFISH_ST_adjusted <- CreateSeuratObject(spot_average_counts_final,assay = "RNA",meta.data = metadata)
+MERFISH_ST_adjusted@images$image <- MERFISH_st@images$image
+saveRDS(MERFISH_ST_adjusted, here::here("test","MERFISH_ST_adjusted.rds"))
+```
+<p>&nbsp;</p>
+### Palette performance assessment
+<p align="justify">We assess the Palette performance through comparing the expression patterns of Palette implemented data to original ST data. Here we show the expression patterns of marker genes Syt4 (Inhibitory neurons) and Mlc1 (Ependymal cells). Compared to the original ST data (Left), the Palette-implemented data (Right) significantly increases the signal-to-noise ratio and exhibits more specific expression patterns. Although the inferred expression levels are much lower due to the lower detection levels in the bulk dataset, our Palette pipeline successfully captures the major gene expression patterns. 
+</p>
+```{r, out.width="100%", fig.align = 'center', fig.cap = "Comparsion of expression patterns."}
+# Construct sce object for expression visualization 
+metadata <-  MERFISH_ST_adjusted@meta.data
+metadata$col <-  MERFISH_ST_adjusted@meta.data$col
+metadata$row <-  MERFISH_ST_adjusted@meta.data$row
+
+
+sce_MERFISH <- SingleCellExperiment(assays = list(counts = MERFISH_ST_adjusted@assays$RNA@counts, logcounts = MERFISH_ST_adjusted@assays$RNA@data),
+                            colData= metadata)
+
+sce_MERFISH <- spatialPreprocess(sce_MERFISH, platform="ST",
+                              n.PCs=4,n.HVGs = 2000, log.normalize=FALSE,skip.PCA=TRUE)
+
+
+p1 <- featurePlot(
+  sce_MERFISH,
+  "Syt4",
+  assay.type = "logcounts",
+  diverging = FALSE,
+  low = NULL,
+  high = "darkblue",
+  mid = NULL,
+  color = NULL,
+  platform = NULL,
+  is.enhanced = NULL,
+)
+
+p2 <- featurePlot(
+  sce_MERFISH,
+  "Mlc1",
+  assay.type = "logcounts",
+  diverging = FALSE,
+  low = NULL,
+  high = "darkblue",
+  mid = NULL,
+  color = NULL,
+  platform = NULL,
+  is.enhanced = NULL,
+)
+
+
+sce_ST <- SingleCellExperiment(assays = list(counts = MERFISH_st@assays$RNA@counts, logcounts = MERFISH_st@assays$RNA@data),
+                            colData=metadata)
+
+sce_ST <- spatialPreprocess(sce_ST, platform="ST",
+                              n.PCs=4,n.HVGs = 2000, log.normalize=FALSE,skip.PCA=TRUE)
+
+p3 <- featurePlot(
+  sce_ST,
+  "Syt4",
+  assay.type = "logcounts",
+  diverging = FALSE,
+  low = NULL,
+  high = "darkblue",
+  mid = NULL,
+  color = NULL,
+  platform = NULL,
+  is.enhanced = NULL,
+)
+
+p4 <- featurePlot(
+  sce_ST,
+  "Mlc1",
+  assay.type = "logcounts",
+  diverging = FALSE,
+  low = NULL,
+  high = "darkblue",
+  mid = NULL,
+  color = NULL,
+  platform = NULL,
+  is.enhanced = NULL,
+)
+
+ggarrange(p3, p1, p4, p2, ncol = 2, nrow = 2)
+```
+<p>&nbsp;</p>
+### Session information
+```{r}
+devtools::session_info(pkgs = c("loaded"))
+```
