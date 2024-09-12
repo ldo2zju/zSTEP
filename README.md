@@ -42,14 +42,18 @@ Here we provide several step-by-step tutorials using _Drosophila_ Stereo-seq dat
 ## About
 If you have any questions, please feel free to contact the following authors responsible for the Palette design, Dr. Yang Dong (yang.dongau@gmail.com), Dr. Tao Cheng (chengtao2ldo@zju.edu.cn) or Dr. Jie Liao (liaojie@zju.edu.cn).
 
-## Reference
+## References
 1. Liu, C. et al. Spatiotemporal mapping of gene expression landscapes and developmental trajectories during zebrafish embryogenesis. _Dev Cell_ 57, 1284-1298 e1285 (2022).
 2. Shah, G. et al. Multi-scale imaging and analysis identify pan-embryo cell dynamics of germlayer formation in zebrafish. _Nat Commun_ 10, 5753 (2019).
 3. Zhao, E. et al. Spatial transcriptomics at subspot resolution with BayesSpace. _Nature Biotechnology_ 39, 1375-+ (2021).
 4. Wang, X., Park, J., Susztak, K., Zhang, N.R. & Li, M. Bulk tissue cell type deconvolution with multi-subject single-cell expression reference. _Nat Commun_ 10, 380 (2019).
 5. Wang, M. et al. High-resolution 3D spatiotemporal transcriptomic maps of developing Drosophila embryos and larvae. _Dev Cell_ 57, 1271-1283 e1274 (2022).
-6. Moffitt, J., et al. Molecular, spatial, and functional single-cell profiling of the hypothalamic preoptic region. _Science_ 362, 6416 (2018).
-7. Thrane, K., et al. Spatially resolved transcriptomics enables dissection of genetic heterogeneity in stage III cutaneous malignant melanoma. _Cancer Res_ 78, 5970–5979 (2018).
+6. Moffitt, J. et al. Molecular, spatial, and functional single-cell profiling of the hypothalamic preoptic region. _Science_ 362, 6416 (2018).
+7. Thrane, K. et al. Spatially resolved transcriptomics enables dissection of genetic heterogeneity in stage III cutaneous malignant melanoma. _Cancer Res_ 78, 5970–5979 (2018).
+
+## Citation
+Our work has been posted on bioRixv and can be cited as follows. 
+Dong, Y. et al. Unravelling the progression of the zebrafish primary body axis with reconstructed spatiotemporal transcriptomics. _bioRxiv_ doi: https://doi.org/10.1101/2024.07.01.601472
 
 
 
