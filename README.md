@@ -52,7 +52,7 @@ If you have any questions, please feel free to contact the following authors res
 7. Thrane, K. et al. Spatially resolved transcriptomics enables dissection of genetic heterogeneity in stage III cutaneous malignant melanoma. _Cancer Res_ 78, 5970–5979 (2018).
 
 ## Citation
-<p align="justify">Our work has been posted on bioRixv and can be cited as follows.</p>
+<p align="justify">Our work has been posted on <em>bioRxiv</em> and can be cited as follows.</p>
 
 Dong, Y. et al. Unravelling the progression of the zebrafish primary body axis with reconstructed spatiotemporal transcriptomics. _bioRxiv_ 2024.07.01.601472, doi: https://doi.org/10.1101/2024.07.01.601472 (2024)
 
