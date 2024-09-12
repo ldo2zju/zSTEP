@@ -1,0 +1,413 @@
+---
+title: "Infering spatial gene expression from melanoma pseudo bulk data (Visium)"
+author: "Yang"
+date: "2024-09-12"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+editor_options:
+  chunk_output_type: console
+---
+<style type="text/css">
+  body{
+  font-size: 12pt;
+}
+</style>
+
+### Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r packages}
+library(limma)
+library(Seurat)
+library(readr)
+library(tidyverse)
+library(magrittr)
+library(pander)
+library(SingleCellExperiment)
+library(reshape2)
+library(BayesSpace)
+library(MuSiC)
+library(ggplot2)
+library(ggpubr)
+library(Matrix.utils)
+
+theme_set(theme_bw())
+panderOptions("big.mark", ",")
+panderOptions("table.split.table", Inf)
+panderOptions("table.style", "rmarkdown")
+if (interactive()) setwd(here::here("analysis"))
+```
+
+### Summary
+<p align="justify">To demonstrate that Visium ST data can serve as an ST reference for Palette, here we present a tutorial using Visium data as the ST reference to infer the spatial gene expression of melanoma tissue. We utilize the Visium data from two melanoma slices, using one as the ST reference and converting the other into a pseudo bulk for Palette inference. The inferred expression patterns will then be compared to the original expression of the Visium reference.
+</p>
+
+### Load data
+```{r}
+melanoma_st1 <- readRDS(here::here("test","melanoma_1_Visium.rds"))
+melanoma_st2 <- readRDS(here::here("test","melanoma_2_Visium.rds"))
+```
+<p>&nbsp;</p>
+### Construct pseudo bulk data and select highly expressed genes
+<p align="justify">Aggregate expression of ST data to generate pseudo bulk. melanoma_st2 is convert to pseudo bulk, while the aggregated expression of ST data (melanoma_st1) is used for selecting highly expressed genes.
+</p>
+```{r}
+# Convert both to pseudo bulk data
+melanoma_st1_sce <- SingleCellExperiment(assays = list(counts = melanoma_st1@assays$RNA@counts), 
+                           colData = melanoma_st1@meta.data)
+groups <- colData(melanoma_st1_sce)[, c("orig.ident")]
+melanoma_st1_bulk <- aggregate.Matrix(t(counts(melanoma_st1_sce)), 
+                       groupings = groups, fun = "sum") %>% 
+  as.data.frame() %>% t() %>% set_colnames("melanoma_st1") %>% 
+  as.data.frame()
+
+
+melanoma_st2_sce <- SingleCellExperiment(assays = list(counts = melanoma_st2@assays$RNA@counts), 
+                           colData = melanoma_st2@meta.data)
+groups <- colData(melanoma_st2_sce)[, c("orig.ident")]
+melanoma_st2_bulk <- aggregate.Matrix(t(counts(melanoma_st2_sce)), 
+                       groupings = groups, fun = "sum") %>% 
+  as.data.frame() %>% t() %>% set_colnames("melanoma_st2") %>% 
+  as.data.frame()
+
+
+# Select highly expressed genes in ST data (melanoma_st1)
+melanoma_st1_bulk_high_exp <- melanoma_st1_bulk %>%
+  as.data.frame() %>%
+  dplyr::filter(rownames(.) %in% rownames(melanoma_st2_bulk)) %>%
+  dplyr::filter(.$melanoma_st1 > 30)
+
+# Reorder genes of pseudo bulk data (melanoma_st2) based on the ST data (melanoma_st1)
+melanoma_st2_bulk_reorder <- melanoma_st2_bulk[match(rownames(melanoma_st1_bulk_high_exp), rownames(melanoma_st2_bulk)),,drop = FALSE] %>%
+  as.data.frame()
+
+# Define the ratio of the pseudo bulk (melanoma_st2) and the aggregate ST (melanoma_st1) as gene filter
+gene_filter <- (melanoma_st2_bulk_reorder/melanoma_st1_bulk_high_exp) %>%
+  set_colnames("ratio") %>%
+  .[is.finite(rowSums(.)),, drop = FALSE]
+```
+<p align="justify">We use density plot to visualize the expression ratios of the pseudo bulk (melanoma_st2) and the aggregated ST (melanoma_st1). We take the top 2000 genes closest to the mean and median ratios for the following analyses. These genes, regarded as stable genes, are highly expressed in both pseudo bulk and ST data.
+</p>
+```{r, out.width="40%", fig.align = 'center',fig.cap = "Density plot showing the expression ratio of pseudo bulk and aggregated ST data."}
+ggplot(gene_filter, aes(x=ratio)) + 
+  geom_density() + theme_classic() +
+  theme(text = element_text(size = 20)) 
+  
+# The difference of gene ratio to the mean and median ratio
+gene_filter$differ <- abs(gene_filter$ratio - (mean(gene_filter$ratio)+median(gene_filter$ratio))/2)
+
+# Select the top 2000 genes closer to the mean and median for spatial clustering and deconvolution
+high_exp_genes <- gene_filter %>%
+  .[order(.$differ),] %>%
+   top_n(.,-2000)
+```
+
+<p>&nbsp;</p>
+### Spatial clustering of ST data
+<p align="justify">BayesSpace is employed for spatial clustering on ST data (melanoma_st1). Only the selected 2000 highly-expressed, stable genes are used for spatial clustering. The cluster identities are then assigned to each ST spot. 
+</p>
+```{r, out.width="80%", fig.align = 'center', fig.cap = "Spatial Clustering of ST data."}
+# Set coordinates for BayesSpace
+metadata <-  melanoma_st1@meta.data
+metadata$col <-  metadata$Y %>% as.numeric()
+metadata$row <-  metadata$X %>% as.numeric()
+
+# Construct sce object
+sce <- SingleCellExperiment(assays = list(counts = melanoma_st1@assays$RNA@counts, logcounts = melanoma_st1@assays$RNA@data),
+                            colData=metadata)
+
+# Only take highly-expressed, stable genes for spatial clustering
+sce_filtered <- sce[rownames(high_exp_genes),]
+sce_filtered <- spatialPreprocess(sce_filtered, platform="ST",
+                              n.PCs=4,n.HVGs = 2000, log.normalize=TRUE)
+# Select the number of clusters
+p <- qTune(sce_filtered, qs=seq(2, 10), platform="ST", d=7)
+
+# Clustering with BayesSpace
+set.seed(149)
+spatial_cluster <- spatialCluster(p, q=4, platform="ST", d=7,
+                           init.method="kmeans", model="t", gamma=2,
+                           nrep=10000, burn.in=100,
+                           save.chain=TRUE)
+
+# Visualizing spatial clusters
+clusterPlot(spatial_cluster, color="black") +
+  theme_bw() +
+  xlab("") +
+  ylab("") + 
+  theme(text = element_text(size = 20)) 
+
+melanoma_st1$spatial_cluster <- spatial_cluster$spatial.cluster
+Idents(melanoma_st1) <- melanoma_st1$spatial_cluster
+
+# Check the proportions of each cluster
+prop_table <- prop.table(table(melanoma_st1$spatial_cluster)) %>% t()
+colnames(prop_table) <- c("cluster 1","cluster 2","cluster 3","cluster 4")
+rownames(prop_table) <- "Proportion"
+knitr::kable(prop_table,
+             caption = "The proportions of each cluster.")
+```
+
+<p>&nbsp;</p>
+### Pseudo bulk deconvolution
+<p align="justify">MuSiC is employed for deconvolution. Also, only the selected 2000 highly-expressed, stable genes are used for deconvolution. We can then achieve the abundances of each cluster in the pseudo bulk data.
+</p>
+```{r Use MuSiC for deconvolution}
+# Pre-process data for MuSiC
+melanoma_st2_bulk$rep <- melanoma_st2_bulk$melanoma_st2
+bulk.est <- Biobase::ExpressionSet(assayData = melanoma_st2_bulk %>% as.matrix())
+sc.eset <- ExpressionSet(assayData = as.matrix(GetAssayData(melanoma_st1[rownames(high_exp_genes),])), phenoData = new("AnnotatedDataFrame", melanoma_st1@meta.data))
+
+melanoma_st1$sample_id <- colnames(melanoma_st1)
+sce <- SingleCellExperiment(assays = list(counts = melanoma_st1[rownames(high_exp_genes),]@assays$RNA@counts, logcounts = melanoma_st1[rownames(high_exp_genes),]@assays$RNA@data),
+                            colData=melanoma_st1@meta.data)
+
+# MuSiC deconvolution
+Est.pro = music_prop(bulk.mtx = exprs(bulk.est), sc.sce = sce,  clusters = "spatial_cluster", samples = "sample_id")
+proportion <- Est.pro$Est.prop.weighted
+proportion_reorder <- proportion[, c("1","2","3","4")]
+
+# The estimated proportion of each cluster in pseudo bulk data
+prop_table_2 <- proportion_reorder[2,] %>% t()
+colnames(prop_table_2) <- c("cluster 1","cluster 2","cluster 3","cluster 4")
+rownames(prop_table_2) <- "Proportion"
+knitr::kable(prop_table_2,
+             caption = "The estimated proportions of each cluster in pseudo bulk data (melanoma_st2).")
+```
+
+<p>&nbsp;</p>
+### Variable factor calculation
+<p align="justify">Here we define a variable factor to adjust the expression difference between the pseudo bulk data and the Visium ST reference. The variable factor is defined as the ratio of bulk expression matrix (melanoma_st2) to the pseudo bulk matrix, which is constructed by the cluster expression of Visium data (melanoma_st1) and cluster abundance of bulk (melanoma_st2). Each gene has its own variable factor to adjust its expression.
+</p>
+```{r Variable factor calculation}
+# The average gene expression of each cluster
+cluster.averages <- AverageExpression(melanoma_st1) %>%
+  as.data.frame() %>%
+  as.matrix()
+
+cluster.averages_filtered <- cluster.averages %>%
+  as.data.frame() %>%
+  rownames_to_column() %>%
+  dplyr::filter(.$rowname %in% rownames(melanoma_st2_bulk)) %>%
+  column_to_rownames(var= "rowname")  %>%
+  as.matrix() %>%
+  .[,c("RNA.1","RNA.2","RNA.3","RNA.4")]
+
+# The abundance of each cluster in the pseudo bulk (melanoma_st2) 
+abundance <- proportion_reorder %>%
+  .[1,,drop=FALSE] %>%
+  as.data.frame() %>%
+  as.matrix()
+
+
+melanoma_st2_bulk_reorder <- melanoma_st2_bulk[match(rownames(cluster.averages_filtered), rownames(melanoma_st2_bulk)),1,drop=FALSE] %>%
+  as.data.frame()
+
+# Define variable factor
+variable_factor <- (melanoma_st2_bulk_reorder/(cluster.averages_filtered %*% (abundance %>% t()))) %>%
+  .[is.finite(rowSums(.)),, drop = FALSE] %>%
+  as.data.frame() %>%
+  set_colnames("var")
+
+variable_factor_matrix <- rep(variable_factor,4) %>%
+  as.data.frame() %>%
+  set_colnames(c("1","2","3","4"))
+rownames(variable_factor_matrix) <- rownames(variable_factor)
+```
+
+```{r print variable factor, echo=FALSE}
+print("The top 5 rows of variable factor")
+head(variable_factor,5)
+# Use variable factor to adjust the average gene expression of each cluster and achieve the adjusted overall gene expression of each cluster called adjusted_matrix
+```
+<p align="justify">The adjusted matrix is the overall gene expression of each cluster, which is obtained by taking the dot product of the cluster expression matrix of Visium ST slice and the variable factor. 
+</p>
+```{r adjusted matrix}
+adjusted_matrix <- ((cluster.averages_filtered[rownames(variable_factor_matrix),] * variable_factor_matrix)) 
+colnames(adjusted_matrix) <- c("cluster 1","cluster 2","cluster 3","cluster 4")
+```
+
+```{r print adjusted matrix, echo=FALSE}
+print("The top 5 rows of adjusted matrix")
+head(adjusted_matrix,5)
+```
+
+<p>&nbsp;</p>
+### Estimate expression of each spot
+<p align="justify">
+The expression of each spot is estimated through a loop algorithm. In each iteration of the loop, the procedure begins by selecting one random spot and its neighboring spots. The number of neighboring spots can be changed depending on the data. The expression of spots belonging to the same cluster is aggregated to form a pseudo bulk data called regional cluster ST (RST).
+<p>&nbsp;</p>
+Here we assume that the ratio of RST to the entire ST data is equal to the ratio of the adjusted RST to the adjusted matrix. We define the ratio of RST to the entire ST as regional factor K. The adjust regional ST equals to the dot product of adjusted matrix and regional factor K. The expression of adjusted RST is then evenly allocated into the selected spots of this cluster.
+After thousands of iterations, the average expression of each spot is almost stable and considered as the output estimated expression.
+</p>
+```{r expression allocation}
+melanoma_st1$X <- melanoma_st1$X %>% as.numeric()
+melanoma_st1$Y <- melanoma_st1$Y %>% as.numeric()
+
+ST <- melanoma_st1_bulk %>%
+  as.data.frame() %>%
+  set_colnames("Counts") %>%
+  rownames_to_column() %>%
+  dplyr::select(Gene=rowname, Counts)
+
+#### Nearest 9 spots
+#### Due to the limited ST spots, we take 9 spots as a region.
+output_final <- data.frame(matrix(ncol = 0, nrow = length(rownames(variable_factor_matrix))))
+rownames(output_final) <- rownames(variable_factor_matrix)
+for (i in 1:5000) {
+  # Select one random spot
+  set.seed(i)
+  random.obj <- melanoma_st1[, sample(colnames(melanoma_st1), size = 1, replace=F)]
+  spot <- random.obj@meta.data[,c("X","Y")] %>% as.data.frame()
+  df <- melanoma_st1@meta.data[,c("X","Y")] %>% as.data.frame()
+  # Calculate the distance from other spots to the selected spot
+  df$distance = sqrt((df$X - spot$X)^2 + (df$Y - spot$Y)^2)
+  # Here we select the nearest 8 spots. The number of the nearest spots can be changed here. 
+  df <- df[order(df$distance),][1:9,]
+  random.neighbor <-  melanoma_st1[,rownames(df)]
+  output_region <- data.frame(matrix(ncol = 0, nrow = length(rownames(variable_factor_matrix))))
+  rownames(output_region) <- rownames(variable_factor_matrix)
+  # For each cluster in the selecting spots
+  for (k in as.numeric(levels(as.factor(random.neighbor$spatial_cluster)))){
+    # Select the spots belonging to the same cluster
+    cluster <- subset(random.neighbor, subset = spatial_cluster == k)
+    # Sum the expression of these spots from the same cluster
+    RST <- colSums(t((cluster@assays$RNA@counts))) %>%
+      as.data.frame() %>%
+      rownames_to_column() %>%
+      dplyr::select(Gene=rowname, Counts = '.')
+    # Define a regional factor K as the ratio of RST to ST
+    K <- RST$Counts/ST$Counts %>%
+      as.data.frame()
+    rownames(K) <- ST$Gene
+    K_filtered <- K %>%
+      rownames_to_column() %>%
+      dplyr::select(Gene=rowname, factor = '.') %>%
+      dplyr::filter(.$Gene %in% rownames(variable_factor_matrix)) %>%
+      column_to_rownames(var= "Gene")  %>%
+      as.matrix()
+    # Adjusted regional bulk equals to the dot product of adjusted matrix and regional factor K
+    region_bulk <- (adjusted_matrix[,k] %>% as.data.frame()) * K_filtered
+    # Assign expression to each spot
+    each_spot <- data.frame(region_bulk/length(cluster$orig.ident))
+    output <- cbind(each_spot, rep(each_spot[1],  length(cluster$orig.ident)))
+    output <- output[1:(length(output)-1)]
+    colnames(output) <- rownames(cluster@meta.data)
+    output_region <- output_region %>%
+      cbind(output)
+    }
+  output_final <- output_final %>%
+    cbind(output_region)
+}
+
+# Calculate the average expression of each spot
+cell_list <- as.list(rownames(melanoma_st1@meta.data))
+
+spot_average_counts_final <- data.frame(matrix(ncol = 0, nrow = length(rownames(variable_factor_matrix))))
+rownames(spot_average_counts_final) <- rownames(variable_factor_matrix)
+spot_rep_times <- data.frame()
+
+for ( i in 1:length(cell_list)) {
+  spot <- colnames(output_final) == cell_list[i]
+  spot_counts <- output_final[, spot, drop = FALSE]
+  spot_rep_times <- spot_rep_times %>%
+    rbind(length(colnames(spot_counts)))
+  spot_average_counts <-  data.frame(rowSums(spot_counts))/length(spot_counts)
+  colnames(spot_average_counts) <- cell_list[i]
+  spot_average_counts_final <- spot_average_counts_final %>%
+    cbind(spot_average_counts)
+}
+
+# Covert Palette-inferred data into seurat object
+melanoma_st1_adjusted <- CreateSeuratObject(spot_average_counts_final,assay = "RNA",meta.data = metadata)
+melanoma_st1_adjusted@images$image <- melanoma_st1@images$image
+saveRDS(melanoma_st1_adjusted, here::here("test","melanoma_st1_adjusted.rds"))
+```
+<p>&nbsp;</p>
+### Palette performance assessment
+<p align="justify">We assess the Palette performance through comparing the expression patterns of Palette implemented data to original ST data. Here we show the expression patterns of genes SPP1 and COL1A1. Compared to the original ST data (Left), the Palette-implemented data (Right) significantly increases the signal-to-noise ratio and exhibits more specific expression patterns. 
+</p>
+```{r, out.width="80%", fig.align = 'center', fig.cap = "Comparsion of expression patterns."}
+# Construct sce object for expression visualization 
+metadata <-  melanoma_st1_adjusted@meta.data
+metadata$col <-  melanoma_st1_adjusted@meta.data$col
+metadata$row <-  melanoma_st1_adjusted@meta.data$row
+
+
+sce_adjusted <- SingleCellExperiment(assays = list(counts = melanoma_st1_adjusted@assays$RNA@counts, logcounts = melanoma_st1_adjusted@assays$RNA@data),
+                            colData= metadata)
+
+sce_adjusted <- spatialPreprocess(sce_adjusted, platform="ST",
+                              n.PCs=4,n.HVGs = 2000, log.normalize=FALSE,skip.PCA=TRUE)
+
+p1 <- featurePlot(
+  sce_adjusted,
+  "SPP1",
+  assay.type = "logcounts",
+  diverging = FALSE,
+  low = NULL,
+  high = "darkblue",
+  mid = NULL,
+  color = NULL,
+  platform = NULL,
+  is.enhanced = NULL,
+)
+
+p2 <- featurePlot(
+  sce_adjusted,
+  "COL1A1",
+  assay.type = "logcounts",
+  diverging = FALSE,
+  low = NULL,
+  high = "darkblue",
+  mid = NULL,
+  color = NULL,
+  platform = NULL,
+  is.enhanced = NULL,
+)
+
+
+sce_ST <- SingleCellExperiment(assays = list(counts = melanoma_st1@assays$RNA@counts, logcounts = melanoma_st1@assays$RNA@data),
+                            colData=metadata)
+
+sce_ST <- spatialPreprocess(sce_ST, platform="ST",
+                              n.PCs=4,n.HVGs = 2000, log.normalize=FALSE,skip.PCA=TRUE)
+
+p3 <- featurePlot(
+  sce_ST,
+  "SPP1",
+  assay.type = "logcounts",
+  diverging = FALSE,
+  low = NULL,
+  high = "darkblue",
+  mid = NULL,
+  color = NULL,
+  platform = NULL,
+  is.enhanced = NULL,
+)
+
+p4 <- featurePlot(
+  sce_ST,
+  "COL1A1",
+  assay.type = "logcounts",
+  diverging = FALSE,
+  low = NULL,
+  high = "darkblue",
+  mid = NULL,
+  color = NULL,
+  platform = NULL,
+  is.enhanced = NULL,
+)
+
+ggarrange(p3, p1, p4, p2, ncol = 2, nrow = 2)
+```
+<p>&nbsp;</p>
+### Session information
+```{r}
+devtools::session_info(pkgs = c("loaded"))
+```
