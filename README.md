@@ -35,7 +35,7 @@ devtools::install_github('xuranw/MuSiC')
 
 ## Tutorial
 Here we provide several step-by-step tutorials using _Drosophila_ Stereo-seq data<sup>5</sup>, MERFISH ST reference<sup>6</sup> and Visium reference<sup>7</sup> as examples. The data is available in the _test_ folder.
-* [Inferring spatial gene expression patterns from _Drosophila_ pseudo bulk data](https://rawcdn.githack.com/ldo2zju/zSTEP/acbacd05000a9f6834e0cfabeadebccc7e214139/analysis/Palette_Drosophila_tutorial.html)
+* [Inferring spatial gene expression patterns from _Drosophila_ pseudo bulk data](https://rawcdn.githack.com/ldo2zju/zSTEP/21de0ea373cbdd03ff04fa7688c00898e577cb0f/analysis/Palette_Drosophila_tutorial_update.html)
 * [Inferring spatial gene expression patterns from mouse hypothalamus bulk (MERFISH as ST reference)](https://rawcdn.githack.com/ldo2zju/zSTEP/37773124553cd7262b3be06ddcdc6d333576b6bd/analysis/Palette_mouse_hypothalamus_tutorial(MERFISH).html)
 * [Inferring spatial gene expression patterns from melanoma pseudo bulk data (Visium as ST reference)](https://rawcdn.githack.com/ldo2zju/zSTEP/37773124553cd7262b3be06ddcdc6d333576b6bd/analysis/Palette_melanoma_tutorial(Visium).html)
 
