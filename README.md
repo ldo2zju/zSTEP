@@ -1,7 +1,7 @@
 # zebrafish SpatioTemperal Expression Profiles (zSTEP)
 
 ### Yang Dong<sup>†</sup>,  Tao Cheng<sup>†</sup>, Xiang Liu<sup>†</sup>,  ..., Jie Liao*, Xiaohui Fan*, Pengfei Xu*
-[![DOI](https://img.shields.io/badge/DOI-10.1186/s13059--025--03917--8-blue)](https://link.springer.com/article/10.1186/s13059-025-03917-8)[![DOI](https://img.shields.io/badge/DOI-10.1101/2024.07.01.601472-yellowgreen)](https://www.biorxiv.org/content/10.1101/2024.07.01.601472v1)
+[![DOI](https://img.shields.io/badge/DOI-10.1186/s13059--025--03917--8-blue)](https://link.springer.com/article/10.1186/s13059-025-03917-8) [![DOI](https://img.shields.io/badge/DOI-10.1101/2024.07.01.601472-yellowgreen)](https://www.biorxiv.org/content/10.1101/2024.07.01.601472v1)
 <p align="justify">zSTEP is a zebrafish spatial gene expression atlas that provides a powerful platform for visualizing gene expression patterns in real zebrafish embryonic cartography and investigating spatial cell-cell interactions within selected regions. As a result, zSTEP holds significant potential for investigating a wide range of developmental events during development. </p>
 <p align="justify">The generation of zSTEP involves performing bulk RNA-seq on serial cryosections taken along the left-right axis, implementation of Palette to infer spatial gene expression using Stereo-seq data<sup>1</sup> as the reference and projection of the ST spots onto the zebrafish live images<sup>2</sup>.</p><br>
 
