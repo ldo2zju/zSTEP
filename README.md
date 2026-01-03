@@ -55,7 +55,7 @@ If you have any questions, please feel free to contact the following authors res
 ## Citation
 <p align="justify">Our work has been published on <em>Genome Biology</em> and can be cited as follows.</p>
 
-Dong, Y. et al. Unravelling the progression of the zebrafish primary body axis with reconstructed spatiotemporal transcriptomics. _bioRxiv_ 2024.07.01.601472, doi: https://doi.org/10.1101/2024.07.01.601472 (2024)
+Dong, Y. et al. Unravelling the progression of the zebrafish primary body axis with reconstructed spatiotemporal transcriptomics. _Genome Biol_ (2026) https://doi.org/10.1186/s13059-025-03917-8
 
 
 
